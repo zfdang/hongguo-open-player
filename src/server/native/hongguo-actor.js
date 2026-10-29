@@ -445,9 +445,22 @@ async function fetchActorRankings({ page = 1, limit = 20, gender = 'all', reques
   }
 
   const signed = signedMetadataRequest('/reading/bookapi/bookmall/cell/change/v', values);
-  const payload = await request(signed, Date.now() + TIMEOUT_MS);
+  let payload = await request(signed, Date.now() + TIMEOUT_MS);
 
-  const parsed = parseRankingPayload(payload, { pageNum, pageLimit, activeSession: session });
+  let parsed;
+  try {
+    parsed = parseRankingPayload(payload, { pageNum, pageLimit, activeSession: session });
+  } catch (err) {
+    if (err.code === 'ACTOR_SCHEMA_ERROR' && pageNum === 1) {
+      // 遇到上游短暂冷启动未选中演员榜，重试一次
+      await new Promise(r => setTimeout(r, 400));
+      const retrySigned = signedMetadataRequest('/reading/bookapi/bookmall/cell/change/v', values);
+      payload = await request(retrySigned, Date.now() + TIMEOUT_MS);
+      parsed = parseRankingPayload(payload, { pageNum, pageLimit, activeSession: session });
+    } else {
+      throw err;
+    }
+  }
   const { actors, rankDate, hasMore, nextOffset, sessionId } = parsed;
 
   // 2.4 更新该 limit 的会话与游标映射

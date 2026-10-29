@@ -563,6 +563,17 @@ createApp({
       lastFocusedBeforeDramaModal = null;
     }
 
+    function openActorFromDrama(actor) {
+      if (!actor || !actor.actor_id) return;
+      closeDramaDetail();
+      openActorDetail({
+        actor_id: actor.actor_id,
+        name: actor.name,
+        avatar: actor.avatar,
+        score: ''
+      });
+    }
+
     function onDramaModalKeydown(e) {
       if (e.key === 'Escape') {
         e.stopPropagation();
@@ -1240,6 +1251,7 @@ createApp({
       showDramaDetailModal,
       openDramaDetail,
       closeDramaDetail,
+      openActorFromDrama,
       onDramaModalKeydown
     };
   }

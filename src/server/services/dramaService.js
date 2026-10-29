@@ -124,6 +124,7 @@ class DramaService {
       tags: Array.isArray(data.tags) ? data.tags : [],
       episode_label: data.episode_label || '',
       social_info: data.social_info || null,
+      celebrities: Array.isArray(data.celebrities) ? data.celebrities : [],
       episodes: data.episodes.map(ep => ({
         vid: String(ep.vid),
         vid_index: Number(ep.vid_index),

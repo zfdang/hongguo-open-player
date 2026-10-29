@@ -591,6 +591,28 @@
               <p v-else class="intro-empty">暂无该剧剧情简介</p>
             </div>
           </div>
+
+          <!-- 演职员表 (有演员信息时展示，可点击查看演员主页) -->
+          <div v-if="activeSeries.celebrities && activeSeries.celebrities.length" class="drama-cast-section">
+            <h4 class="intro-heading">🎬 演职员表 ({{ activeSeries.celebrities.length }})</h4>
+            <div class="drama-cast-list">
+              <div 
+                v-for="actor in activeSeries.celebrities" 
+                :key="actor.actor_id || actor.name"
+                class="drama-cast-card"
+                :class="{ clickable: !!actor.actor_id }"
+                @click="actor.actor_id && openActorFromDrama(actor)"
+                :title="actor.actor_id ? '点击查看演员主页及作品' : actor.name"
+              >
+                <img v-if="actor.avatar" :src="actor.avatar" :alt="actor.name" class="cast-avatar" referrerpolicy="no-referrer" @error="onAvatarError" />
+                <div v-else class="cast-avatar-fallback">👤</div>
+                <div class="cast-info">
+                  <span class="cast-name">{{ actor.name }}</span>
+                  <span v-if="actor.role" class="cast-role">{{ actor.role }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="drama-modal-footer">
           <button class="drama-continue-btn" @click="closeDramaDetail">继续播放</button>
