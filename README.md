@@ -1,4 +1,4 @@
-<p><img src="build/icon.png" alt="红果开源播放器图标" width="96" height="96"></p>
+<p><img src="src/client/assets/app-icon.png" alt="红果开源播放器：开放圆环与播放键图标" width="96" height="96"></p>
 
 # 红果开源播放器 (Hongguo Open Player)
 
