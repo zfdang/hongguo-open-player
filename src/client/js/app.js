@@ -76,19 +76,32 @@ createApp({
     const previewPercent = ref(0);
     const showPreview = ref(false);
 
+    function setControlsHidden(hidden) {
+      isControlsHidden.value = hidden;
+      if (typeof document !== 'undefined' && document.body?.classList) {
+        document.body.classList.toggle('hide-cursor', Boolean(hidden && isFullscreen.value));
+      }
+    }
+
+    function handleWindowMouseMove() {
+      if (isFullscreen.value && isControlsHidden.value) {
+        resetControlsTimer();
+      }
+    }
+
     function clearControlsTimer() {
       clearTimeout(controlsHideTimer);
     }
 
     function resetControlsTimer() {
       if (isControlsHidden.value) {
-        isControlsHidden.value = false;
+        setControlsHidden(false);
       }
       clearTimeout(controlsHideTimer);
       if (isFullscreen.value && isPlaying.value && !isScrubbing.value) {
         controlsHideTimer = setTimeout(() => {
           if (isFullscreen.value && isPlaying.value && !isScrubbing.value) {
-            isControlsHidden.value = true;
+            setControlsHidden(true);
           }
         }, 2500);
       }
@@ -108,7 +121,7 @@ createApp({
     }
     function startScrubbing(event) {
       isScrubbing.value = true;
-      isControlsHidden.value = false;
+      setControlsHidden(false);
       clearTimeout(controlsHideTimer);
       event.target.setPointerCapture?.(event.pointerId);
     }
@@ -135,7 +148,7 @@ createApp({
       isFullscreen.value = active;
       if (!active) {
         fullscreenExitAt = Date.now();
-        isControlsHidden.value = false;
+        setControlsHidden(false);
         clearTimeout(controlsHideTimer);
       } else {
         resetControlsTimer();
@@ -568,7 +581,7 @@ createApp({
       saveProgressNow();
       if (videoEl.value) videoEl.value.pause();
       resetPlayback();
-      isControlsHidden.value = false;
+      setControlsHidden(false);
       clearTimeout(controlsHideTimer);
       viewMode.value = 'catalog';
       if (navigator.mediaSession) { navigator.mediaSession.playbackState = 'none'; navigator.mediaSession.metadata = null; }
@@ -811,7 +824,7 @@ createApp({
       isPlaying.value = false;
       if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused';
       saveProgressNow();
-      isControlsHidden.value = false;
+      setControlsHidden(false);
       clearTimeout(controlsHideTimer);
     }
 
@@ -1029,6 +1042,7 @@ createApp({
       loadCatalog();
       window.addEventListener('keydown', handleKeyDown);
       window.addEventListener('click', handleGlobalClick);
+      window.addEventListener('mousemove', handleWindowMouseMove);
       document.addEventListener?.('pointerdown', handleGlobalPointerDown, true);
       document.addEventListener?.('focusin', handleGlobalFocusIn);
       window.addEventListener('pagehide', saveProgressNow);
@@ -1050,11 +1064,13 @@ createApp({
     onUnmounted(() => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('click', handleGlobalClick);
+      window.removeEventListener('mousemove', handleWindowMouseMove);
       document.removeEventListener?.('pointerdown', handleGlobalPointerDown, true);
       document.removeEventListener?.('focusin', handleGlobalFocusIn);
       window.removeEventListener('pagehide', saveProgressNow);
       document.removeEventListener?.('fullscreenchange', fullscreenChanged);
       clearTimeout(toastTimer); clearTimeout(osdTimer);
+      setControlsHidden(false);
       clearTimeout(controlsHideTimer);
       if (navigator.mediaSession) for (const name of ['play', 'pause', 'previoustrack', 'nexttrack']) {
         try { navigator.mediaSession.setActionHandler(name, null); } catch (_) {}
@@ -1064,7 +1080,7 @@ createApp({
 
     return {
       toastText, osdMessage, sidebarOpen, isScrubbing, previewTime, previewPercent, showPreview,
-      isFullscreen, isControlsHidden, resetControlsTimer, clearControlsTimer,
+      isFullscreen, isControlsHidden, resetControlsTimer, clearControlsTimer, setControlsHidden, handleWindowMouseMove,
       previewSeek, seekFromSlider, startScrubbing, finishScrubbing,
       viewMode,
       currentTab,

@@ -640,12 +640,24 @@ test('fullscreen auto-hide: controls hide when idle while playing, awaken on int
     timerFn = null;
   };
 
+  const bodyClasses = new Set();
   const state = client(async () => response([]), {
     setTimeout: mockSetTimeout,
     clearTimeout: mockClearTimeout,
     document: {
       fullscreenElement: null,
       documentElement: { classList: { add() {} } },
+      body: {
+        classList: {
+          add: cls => bodyClasses.add(cls),
+          remove: cls => bodyClasses.delete(cls),
+          toggle: (cls, val) => {
+            if (val) bodyClasses.add(cls);
+            else bodyClasses.delete(cls);
+          },
+          contains: cls => bodyClasses.has(cls)
+        }
+      },
       addEventListener() {},
       removeEventListener() {}
     }
@@ -654,6 +666,7 @@ test('fullscreen auto-hide: controls hide when idle while playing, awaken on int
   // Initially not fullscreen, not playing
   assert.equal(state.isFullscreen.value, false);
   assert.equal(state.isControlsHidden.value, false);
+  assert.equal(bodyClasses.has('hide-cursor'), false);
 
   // 1. Enter fullscreen while playing
   state.isFullscreen.value = true;
@@ -663,18 +676,32 @@ test('fullscreen auto-hide: controls hide when idle while playing, awaken on int
   assert.equal(timerMs, 2500, 'Controls timer should be set to 2.5s');
   assert.ok(typeof timerFn === 'function');
   assert.equal(state.isControlsHidden.value, false);
+  assert.equal(bodyClasses.has('hide-cursor'), false);
 
-  // Fire the timer -> controls should hide
+  // Fire the timer -> controls should hide and hide-cursor class added
   timerFn();
   assert.equal(state.isControlsHidden.value, true, 'Controls should hide after timer fires');
+  assert.equal(bodyClasses.has('hide-cursor'), true, 'Body must have hide-cursor class');
 
-  // 2. User moves mouse / interacts -> resetControlsTimer awakens controls immediately
+  // 2. User moves mouse / interacts -> resetControlsTimer awakens controls and restores cursor immediately
   state.resetControlsTimer();
   assert.equal(state.isControlsHidden.value, false, 'Controls should awaken on user interaction');
+  assert.equal(bodyClasses.has('hide-cursor'), false, 'hide-cursor must be removed on user interaction');
+
+  // Fire timer again
+  state.resetControlsTimer();
+  timerFn();
+  assert.equal(bodyClasses.has('hide-cursor'), true);
+
+  // Window mouse move also awakens controls
+  state.handleWindowMouseMove();
+  assert.equal(state.isControlsHidden.value, false);
+  assert.equal(bodyClasses.has('hide-cursor'), false);
 
   // 3. User pauses video -> controls must not hide
   state.onPause();
   assert.equal(state.isControlsHidden.value, false);
+  assert.equal(bodyClasses.has('hide-cursor'), false);
   assert.ok(timerCleared, 'Timer should be cleared when paused');
 
   // Calling resetControlsTimer while paused should not set a timer
@@ -699,6 +726,7 @@ test('fullscreen auto-hide: controls hide when idle while playing, awaken on int
   state.clearControlsTimer();
   assert.ok(timerCleared);
   assert.equal(state.isControlsHidden.value, false);
+  assert.equal(bodyClasses.has('hide-cursor'), false);
 });
 
 

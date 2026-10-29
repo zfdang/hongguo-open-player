@@ -1049,11 +1049,20 @@ html.platform-mac .app-header {
 }
 
 /* 全屏空闲时自动淡出隐藏控制条与鼠标光标 */
+.player-container.controls-hidden,
+.player-container.controls-hidden *,
+.player-container.controls-hidden video,
 .player-container:fullscreen.controls-hidden,
-.player-container.is-fullscreen.controls-hidden {
-  cursor: none;
+.player-container:fullscreen.controls-hidden *,
+.player-container.is-fullscreen.controls-hidden,
+.player-container.is-fullscreen.controls-hidden *,
+body.hide-cursor,
+body.hide-cursor * {
+  cursor: none !important;
+  cursor: url('data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'), none !important;
 }
 
+.player-container.controls-hidden .player-header,
 .player-container:fullscreen.controls-hidden .player-header,
 .player-container.is-fullscreen.controls-hidden .player-header {
   opacity: 0;
@@ -1061,6 +1070,7 @@ html.platform-mac .app-header {
   pointer-events: none;
 }
 
+.player-container.controls-hidden .player-controls,
 .player-container:fullscreen.controls-hidden .player-controls,
 .player-container.is-fullscreen.controls-hidden .player-controls {
   opacity: 0;
