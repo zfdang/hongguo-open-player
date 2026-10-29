@@ -46,6 +46,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-wrap: nowrap;
   padding: 0 20px 0 20px; /* Windows / Linux / 浏览器标准对称边距 */
   position: sticky;
   top: 0;
@@ -70,8 +72,10 @@ html.platform-mac .app-header {
 .header-left {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .brand {
@@ -102,6 +106,8 @@ html.platform-mac .app-header {
   letter-spacing: 0.3px;
   color: #f3f4f6;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
 }
 
 .brand-accent {
@@ -111,11 +117,24 @@ html.platform-mac .app-header {
   margin-right: 1px;
 }
 
+.brand-suffix {
+  white-space: nowrap;
+}
+
 .nav-tabs {
   display: flex;
   align-items: center;
   gap: 4px;
   flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.nav-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .nav-item {
@@ -124,10 +143,11 @@ html.platform-mac .app-header {
   color: var(--text-sub);
   font-size: 12.5px;
   font-weight: 500;
-  padding: 5px 10px;
+  padding: 5px 8px;
   border-radius: 16px;
   cursor: pointer;
   white-space: nowrap;
+  flex-shrink: 0;
   transition: all 0.18s ease;
 }
 
@@ -156,14 +176,16 @@ html.platform-mac .app-header {
   border: 1px solid var(--border-color);
   border-radius: 20px;
   padding: 3px 4px 3px 12px;
-  width: 240px;
+  width: clamp(140px, 16vw, 220px);
+  min-width: 130px;
   -webkit-app-region: no-drag;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s, width 0.2s ease;
 }
 
 .search-box:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-glow);
+  width: clamp(180px, 20vw, 260px);
 }
 
 .search-icon {
@@ -1731,22 +1753,19 @@ html.platform-win .app-header { padding-right: 160px; }
 }
 
 @media (max-width: 1250px) {
-  .app-header { height: 110px; flex-wrap: wrap; align-content: center; row-gap: 8px; }
-  .header-left { width: 100%; }
-  .nav-tabs { flex: 1; overflow-x: auto; }
-  .header-right { width: 100%; justify-content: flex-end; }
-  .search-box { width: min(420px, 100%); }
-  .theater-view { top: 110px; height: calc(100vh - 110px); }
   .theater-sidebar { width: 280px; }
   .keyboard-hints { display: none; }
   .now-playing-info { min-width: 0; flex-direction: column; align-items: flex-start; gap: 2px; }
   .playing-title { max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
+
+@media (max-width: 1080px) {
+  .brand-suffix { display: none; }
+}
+
 @media (max-width: 760px) {
   .brand-name { display: none; }
-  .app-header { padding-left: 12px; padding-right: 12px; }
-  .nav-tabs { gap: 4px; }
-  .nav-item { padding: 8px; }
+  .nav-tabs { gap: 2px; }
   .theater-sidebar { position: absolute; top: 52px; bottom: 84px; right: 0; z-index: 20; width: min(300px, 85vw); box-shadow: var(--shadow); }
   .controls-toolbar { gap: 4px; }
   .controls-left, .controls-right { gap: 4px; }
