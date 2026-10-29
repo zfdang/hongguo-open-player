@@ -25,6 +25,7 @@ createApp({
     // 剧星榜（演员排行榜）状态
     const actors = ref([]);
     const actorPage = ref(1);
+    const actorGender = ref('all'); // 'all' | 'male' | 'female'
     const actorHasMore = ref(false);
     const actorRankDate = ref('');
     const loadingActors = ref(false);
@@ -239,13 +240,17 @@ createApp({
     async function loadActorRankings() {
       const requestId = ++actorRankingRequestId;
       const targetPage = actorPage.value;
+      const targetGender = actorGender.value;
       loadingActors.value = true;
       try {
-        const response = await fetch(`/api/actors/ranking?page=${targetPage}`);
+        const query = targetGender && targetGender !== 'all'
+          ? `/api/actors/ranking?page=${targetPage}&limit=20&gender=${targetGender}`
+          : `/api/actors/ranking?page=${targetPage}`;
+        const response = await fetch(query);
         const data = await response.json();
 
-        // 校验请求新鲜度：若已被新请求取代、已切出剧星榜、或当前展示页码已变更，丢弃旧响应
-        if (requestId !== actorRankingRequestId || currentTab.value !== 'actors' || actorPage.value !== targetPage) {
+        // 校验请求新鲜度：若已被新请求取代、已切出剧星榜、当前展示页码或筛选性别已变更，丢弃旧响应
+        if (requestId !== actorRankingRequestId || currentTab.value !== 'actors' || actorPage.value !== targetPage || actorGender.value !== targetGender) {
           return;
         }
 
@@ -256,7 +261,7 @@ createApp({
         actorRankDate.value = data.rank_date || '';
         actorHasMore.value = !!data.has_more;
       } catch (err) {
-        if (requestId !== actorRankingRequestId || currentTab.value !== 'actors' || actorPage.value !== targetPage) {
+        if (requestId !== actorRankingRequestId || currentTab.value !== 'actors' || actorPage.value !== targetPage || actorGender.value !== targetGender) {
           return;
         }
         console.error('加载剧星榜失败:', err);
@@ -274,6 +279,13 @@ createApp({
           loadingActors.value = false;
         }
       }
+    }
+
+    function switchActorGender(gender) {
+      if (actorGender.value === gender) return;
+      actorGender.value = gender;
+      actorPage.value = 1;
+      loadActorRankings();
     }
 
     function changeActorPage(delta) {
@@ -319,6 +331,9 @@ createApp({
 
         if (detailRes.status === 'fulfilled' && detailRes.value?.success) {
           activeActorDetail.value = detailRes.value.actor;
+          if (detailRes.value.actor?.avatar && activeActor.value) {
+            activeActor.value.avatar = detailRes.value.actor.avatar;
+          }
         }
 
         if (worksRes.status === 'fulfilled' && worksRes.value?.success) {
@@ -1023,6 +1038,7 @@ createApp({
       keepPlayerFocus,
       actors,
       actorPage,
+      actorGender,
       actorHasMore,
       actorRankDate,
       loadingActors,
@@ -1037,6 +1053,7 @@ createApp({
       actorWorksError,
       loadActorRankings,
       changeActorPage,
+      switchActorGender,
       openActorDetail,
       closeActorDetail,
       loadMoreActorWorks,

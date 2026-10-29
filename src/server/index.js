@@ -191,8 +191,8 @@ app.post('/api/favorites/toggle', async (req, res) => {
  */
 app.get('/api/actors/ranking', async (req, res) => {
   try {
-    const { page, limit } = req.query;
-    const data = await dramaService.getActorRankings({ page, limit });
+    const { page, limit, gender } = req.query;
+    const data = await dramaService.getActorRankings({ page, limit, gender });
     res.json(data);
   } catch (err) {
     sendApiError(res, err);

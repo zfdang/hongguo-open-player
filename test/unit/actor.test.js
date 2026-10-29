@@ -17,13 +17,17 @@ const {
 const dramaService = require('../../src/server/services/dramaService');
 const { startServer } = require('../../src/server/index');
 
-test('catalogCover converts HEIC to JPEG compatible variants and preserves JPEG', () => {
+test('catalogCover converts HEIC and novel-pic URLs to public JPEG variants and preserves external images', () => {
   assert.equal(catalogCover(''), '');
   assert.equal(catalogCover(null), '');
 
-  // JPEG url preserves
-  const jpegUrl = 'https://p3-reading-sign.fqnovelpic.com/novel-pic/abc.jpeg?x=1';
-  assert.equal(catalogCover(jpegUrl), jpegUrl);
+  // External images preserved
+  const externalUrl = 'https://img.example.com/cover/abc.jpeg?x=1';
+  assert.equal(catalogCover(externalUrl), externalUrl);
+
+  // Signed JPEG avatar URL on fqnovelpic converts to public 640x640 JPEG image
+  const avatarJpegUrl = 'http://p3-reading-sign.fqnovelpic.com/novel-pic/c61a718fd0ac4df9afffc0aae28b43e6~tplv-s85hriknmn-jpeg-v1:144:0.jpeg?lk3s=9b9bd2b1&x-expires=1795796883';
+  assert.equal(catalogCover(avatarJpegUrl), 'https://p3-novel.byteimg.com/novel-pic/c61a718fd0ac4df9afffc0aae28b43e6~tplv-shrink:640:0.image');
 
   // HEIC url converts to public JPEG image
   const heicUrl = 'https://p3-reading-sign.fqnovelpic.com/novel-pic/f46efa4c55e9b146f7d4906fd88ceb4e~tplv-81nmtwyey9.heic?x-expires=123';
@@ -321,6 +325,80 @@ test('fetchActorRankings isolates cache and session cursors by pageLimit', async
   assert.equal(requestsMade.length, 3);
 });
 
+test('fetchActorRankings filters by gender (male, female) and isolates pagination/sessions', async () => {
+  clearActorSession();
+
+  const mockGenderRequest = async (signed) => {
+    return {
+      code: 0,
+      data: {
+        has_more: false,
+        next_offset: 4,
+        session_id: 'mock-gender-session',
+        cell_view: {
+          cell_data_json: JSON.stringify({ rank_list_date: '2026年10月29日' }),
+          cell_data: [
+            {
+              ugc_user_data: [
+                {
+                  user_info: {
+                    base_info: { actor_id_str: '101', user_name: '王凯沐' } // Known male
+                  },
+                  rec_text_item: { RecommendText: '100万人气' },
+                  intro: '中国内地男演员'
+                },
+                {
+                  user_info: {
+                    base_info: { actor_id_str: '102', user_name: '王小亿' } // Known female
+                  },
+                  rec_text_item: { RecommendText: '90万人气' },
+                  intro: '中国内地女演员'
+                },
+                {
+                  user_info: {
+                    base_info: { actor_id_str: '103', user_name: '梁思伟' } // Known male
+                  },
+                  rec_text_item: { RecommendText: '80万人气' },
+                  intro: '中国内地男演员'
+                },
+                {
+                  user_info: {
+                    base_info: { actor_id_str: '104', user_name: '何雅馨' } // Known female
+                  },
+                  rec_text_item: { RecommendText: '70万人气' },
+                  intro: '全网知名达人何娜娜'
+                }
+              ]
+            }
+          ]
+        }
+      }
+    };
+  };
+
+  // 1. Male filter -> only male actors
+  const maleRes = await fetchActorRankings({ page: 1, limit: 10, gender: 'male', request: mockGenderRequest });
+  assert.equal(maleRes.success, true);
+  assert.equal(maleRes.gender, 'male');
+  assert.equal(maleRes.actors.length, 2);
+  assert.equal(maleRes.actors[0].name, '王凯沐');
+  assert.equal(maleRes.actors[1].name, '梁思伟');
+
+  // 2. Female filter -> only female actors
+  const femaleRes = await fetchActorRankings({ page: 1, limit: 10, gender: 'female', request: mockGenderRequest });
+  assert.equal(femaleRes.success, true);
+  assert.equal(femaleRes.gender, 'female');
+  assert.equal(femaleRes.actors.length, 2);
+  assert.equal(femaleRes.actors[0].name, '王小亿');
+  assert.equal(femaleRes.actors[1].name, '何雅馨');
+
+  // 3. All filter -> all 4 actors
+  const allRes = await fetchActorRankings({ page: 1, limit: 10, gender: 'all', request: mockGenderRequest });
+  assert.equal(allRes.success, true);
+  assert.equal(allRes.gender, 'all');
+  assert.equal(allRes.actors.length, 4);
+});
+
 test('fetchActorDetail and fetchActorWorks parse profiles, related actors and drama works', async () => {
   // 1. Detail parsing
   const mockDetailRequest = async () => ({
@@ -414,10 +492,11 @@ test('actor REST API endpoints return JSON and handle invalid parameters', async
     dramaService.getActorWorks = originalGetWorks;
   });
 
-  dramaService.getActorRankings = async ({ page, limit }) => ({
+  dramaService.getActorRankings = async ({ page, limit, gender = 'all' }) => ({
     success: true,
     page: Number(page) || 1,
     limit: Number(limit) || 20,
+    gender,
     actors: [
       { actor_id: '7602119348190205246', name: '何健麒', rank: 1, score: '1000万人气' }
     ]
@@ -470,6 +549,12 @@ test('actor REST API endpoints return JSON and handle invalid parameters', async
     assert.equal(rankRes.data.success, true);
     assert.ok(Array.isArray(rankRes.data.actors));
     assert.equal(rankRes.data.actors[0].name, '何健麒');
+
+    // 2.1 GET /api/actors/ranking with gender filter
+    const rankFemaleRes = await get('/api/actors/ranking?page=1&limit=5&gender=female');
+    assert.equal(rankFemaleRes.status, 200);
+    assert.equal(rankFemaleRes.data.success, true);
+    assert.equal(rankFemaleRes.data.gender, 'female');
 
     // 3. GET /api/actors/:actorId
     const detailRes = await get('/api/actors/7602119348190205246');

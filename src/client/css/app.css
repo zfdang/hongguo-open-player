@@ -1011,6 +1011,61 @@ html.platform-win .app-header { padding-right: 160px; }
   line-height: 1.5;
 }
 
+/* 剧星榜性别分类筛选条 */
+.actor-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 12px 20px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.actor-filter-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-sub);
+  white-space: nowrap;
+}
+
+.actor-filter-chips {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.actor-filter-chip {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  color: var(--text-sub);
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.actor-filter-chip:hover:not(:disabled) {
+  background: rgba(255, 51, 85, 0.12);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.actor-filter-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 10px var(--accent-glow);
+}
+
+.actor-filter-chip:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .actor-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -1281,6 +1336,8 @@ html.platform-win .app-header { padding-right: 160px; }
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
+  flex-shrink: 0;
+  max-height: 220px;
 }
 
 .actor-profile-main {
@@ -1340,20 +1397,25 @@ html.platform-win .app-header { padding-right: 160px; }
 
 .related-celebrities-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  flex-wrap: wrap;
 }
 
 .related-label {
   font-size: 12px;
   color: var(--text-dim);
+  flex-shrink: 0;
+  padding-top: 3px;
 }
 
 .related-list {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  max-height: 72px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
 }
 
 .related-actor-chip {
@@ -1409,6 +1471,7 @@ html.platform-win .app-header { padding-right: 160px; }
   padding: 24px 28px;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
 }
 
 .works-section-header {

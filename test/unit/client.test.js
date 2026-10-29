@@ -542,5 +542,68 @@ test('stale actor ranking responses do not overwrite current page after switchin
   assert.equal(state.actors.value[0].rank, 1);
 });
 
+test('switching actor gender reloads rankings with gender query and discards stale gender responses', async () => {
+  const pendingRequests = new Map();
+  const state = client(url => new Promise(resolve => {
+    pendingRequests.set(url, resolve);
+  }));
+
+  state.switchTab('actors');
+  assert.equal(state.actorGender.value, 'all');
+
+  // Resolve initial 'all' request
+  pendingRequests.get('/api/actors/ranking?page=1')(response({
+    success: true,
+    rank_date: '2026-10-29',
+    has_more: true,
+    actors: [{ actor_id: '1', name: '全部演员', rank: 1 }]
+  }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.actors.value[0].name, '全部演员');
+
+  // 1. Advance to page 2 of 'all'
+  state.changeActorPage(1);
+  assert.equal(state.actorPage.value, 2);
+
+  // 2. Switch to 'male' -> must reset actorPage to 1 and request gender=male
+  state.switchActorGender('male');
+  assert.equal(state.actorGender.value, 'male');
+  assert.equal(state.actorPage.value, 1);
+
+  const maleReqKey = '/api/actors/ranking?page=1&limit=20&gender=male';
+  const maleResolve = pendingRequests.get(maleReqKey);
+  assert.ok(maleResolve, `Should have requested ${maleReqKey}`);
+
+  // 3. While male request is in flight, switch to 'female'
+  state.switchActorGender('female');
+  assert.equal(state.actorGender.value, 'female');
+  assert.equal(state.actorPage.value, 1);
+
+  const femaleReqKey = '/api/actors/ranking?page=1&limit=20&gender=female';
+  const femaleResolve = pendingRequests.get(femaleReqKey);
+  assert.ok(femaleResolve, `Should have requested ${femaleReqKey}`);
+
+  // 4. Male request finally arrives late!
+  maleResolve(response({
+    success: true,
+    actors: [{ actor_id: 'm1', name: '男演员1', rank: 4 }]
+  }));
+  await new Promise(resolve => setImmediate(resolve));
+
+  // Must NOT overwrite with male data!
+  assert.notEqual(state.actors.value[0]?.name, '男演员1');
+
+  // 5. Female response arrives
+  femaleResolve(response({
+    success: true,
+    actors: [{ actor_id: 'f1', name: '女演员1', rank: 1 }]
+  }));
+  await new Promise(resolve => setImmediate(resolve));
+
+  // Now active data is female
+  assert.equal(state.actors.value[0].name, '女演员1');
+  assert.equal(state.actorGender.value, 'female');
+});
+
 
 

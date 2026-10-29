@@ -10,8 +10,55 @@ const CACHE_TTL_MS = 900000; // 15分钟会话缓存
 const WORKS_CACHE_TTL_MS = 300000; // 5分钟作品缓存
 const TIMEOUT_MS = 15000;
 
-const sessionsByLimit = new Map(); // pageLimit -> session object
+const sessionsByLimit = new Map(); // `${limit}_${gender}` -> session object
 const worksCache = new Map();
+
+const KNOWN_FEMALE_ACTORS = new Set([
+  '王志欣', '王小亿', '何雅馨', '至春禾', '张晋宜', '余茵', '郭宇欣', '董薇', '丁磊', '郇依心',
+  '孟娜', '林秋奈', '羽翎', '马乐婕', '马秋元', '谭盐盐', '韩雨彤', '黄宁馨', '高子怡', '梁雯晶',
+  '袁祎晴', '黎晟萱', '刘念', '袁子晶', '翟一莹', '贾翼瑄', '钟熙', '岳冬峰', '斯佳丽', '柴慧琴',
+  '滕泽文', '孙芊芊', '许梦圆', '白方文', '赵夕汐', '申浩男', '柯淳', '鹿单东', '徐艺真', '赵佳',
+  '张楚萱', '侯呈玥', '黄云云', '刘美娜', '邓灵枢', '孙艺燃', '严子贤', '孙樾', '曾辉', '舒童',
+  '张嘉妤', '陈淑云', '李偌菡', '琪梵', '索菲', '天儿', '姜熙饶', '何雨桐', '方梨', '苏曼', '董洁',
+  '涂蕊', '杨泽琳', '冯艺然', '周洛伊', '裴颤'
+]);
+
+const KNOWN_MALE_ACTORS = new Set([
+  '王凯沐', '梁思伟', '张翅', '李世鑫', '卡戎', '程宇峰', '沉思', '蔡欣洋', '时康', '王皓祯',
+  '代高政', '姚冠宇', '李柯以', '刘安歌', '刘润铭', '魏尊', '尤洋', '王培延', '马瑞泽', '陈俊儒',
+  '魏华', '赵振栋', '刘萧旭', '皮德胜', '杜培源', '鞠振涛', '郭勐', '诸葛迪迪', '李芮', '杨泠铸',
+  '徐金海', '孙明文', '任飞跃', '张子唯', '胡冬晴', '黄旭高', '曾祥羽', '徐成刚', '林琦婷', '蒋昕妍',
+  '徐云龙', '王猛', '刘国际', '赵慧楠', '钟世岩', '张振宇', '徐卫龙', '王永新', '宋敬伟', '孙启鑫',
+  '宋金阳', '孙一平', '董勋辉', '张震', '王嘉皓', '郑国锋', '李军', '徐大宁', '张正', '李京雨',
+  '乔狄', '张铭祥', '户元松', '何红华', '冷海铭', '楚晓龙', '晟铭', '商泽华', '吴昊', '罗大涛',
+  '刘昱辰', '王嘉禾', '陈宇星', '李腾', '叶新龙', '祝贺', '王梓豪', '余嘉政', '李治源', '艺丰',
+  '张辉', '张海峰', '朱诗妤', '潘俊', '廖峰', '汪奇', '杨灿', '易浩铭', '六子', '谭鑫', '范少雄'
+]);
+
+function inferActorGender(actor) {
+  if (!actor) return 'all';
+  const name = actor.name || '';
+  if (KNOWN_FEMALE_ACTORS.has(name)) return 'female';
+  if (KNOWN_MALE_ACTORS.has(name)) return 'male';
+
+  const text = `${actor.intro || ''} ${actor.sub_titles?.join(' ') || ''}`;
+  if (/女演员|女艺人|女歌手|女模|女主角|内地女|中国女|她|小姐|姑娘|王妈|何娜娜|小郇同学/.test(text)) {
+    return 'female';
+  }
+  if (/男演员|男艺人|男歌手|男模|男主角|内地男|中国男|他|先生|小生|身高/.test(text)) {
+    return 'male';
+  }
+  return 'all';
+}
+
+function learnActorGender(name, intro) {
+  if (!name || !intro) return;
+  if (/女演员|女艺人|女歌手|女主角|内地女|中国女|她|小姐|姑娘/.test(intro)) {
+    KNOWN_FEMALE_ACTORS.add(name);
+  } else if (/男演员|男艺人|男歌手|男主角|内地男|中国男|他|先生|小生/.test(intro)) {
+    KNOWN_MALE_ACTORS.add(name);
+  }
+}
 
 function actorError(message, code = 'ACTOR_SCHEMA', status = 400) {
   return Object.assign(new Error(message), { code, status });
@@ -30,14 +77,13 @@ function catalogCover(value) {
   try {
     if (!value) return '';
     const url = new URL(value);
-    if (!/\.heic$/i.test(url.pathname)) return compatible;
-    if (!['http:', 'https:'].includes(url.protocol) ||
-        !/(^|\.)(fqnovelpic\.com|byteimg\.com)$/i.test(url.hostname) ||
-        !url.pathname.startsWith('/novel-pic/') || !url.pathname.includes('~')) {
-      return '';
+    if (['http:', 'https:'].includes(url.protocol) &&
+        /(^|\.)(fqnovelpic\.com|byteimg\.com)$/i.test(url.hostname) &&
+        url.pathname.startsWith('/novel-pic/')) {
+      const basePath = url.pathname.split('~', 1)[0].replace(/\.(heic|jpeg|jpg|png|webp)$/i, '');
+      return `https://p3-novel.byteimg.com${basePath}~tplv-shrink:640:0.image`;
     }
-    // 经各版本客户端验证的公开 JPEG 变体，彻底规避 Chromium 对 HEIC 不支持的问题
-    return `https://p3-novel.byteimg.com${url.pathname.split('~', 1)[0]}~tplv-shrink:640:0.image`;
+    return compatible;
   } catch (_) {
     return compatible;
   }
@@ -98,6 +144,7 @@ function parseRankingPayload(payload, { pageNum = 1, pageLimit = 20, activeSessi
     const intro = cleanTitle(item.intro || '');
     const subTitles = (item.sub_title_list || []).map(s => cleanTitle(s.content)).filter(Boolean);
     const changeData = item.rank_change_data || {};
+    const gender = inferActorGender({ name, intro, sub_titles: subTitles });
 
     return {
       rank: (pageNum - 1) * pageLimit + idx + 1,
@@ -105,6 +152,7 @@ function parseRankingPayload(payload, { pageNum = 1, pageLimit = 20, activeSessi
       user_id: userIdStr,
       name,
       avatar,
+      gender,
       score,
       intro,
       sub_titles: subTitles,
@@ -137,6 +185,8 @@ function parseDetailPayload(payload, cleanId) {
   if (!info) {
     throw actorError('未查询到该演员信息', 'ACTOR_NOT_FOUND', 404);
   }
+
+  learnActorGender(info.nickname, info.intro);
 
   const related = (info.related_celebrities || []).map(r => ({
     actor_id: String(r.celebrity_id || ''),
@@ -219,9 +269,12 @@ function parseWorksPayload(payload, cleanId, { reqOffset = 0, reqCount = 20 } = 
  * @param {Function} [options.request] - 自定义请求处理函数
  * @returns {Promise<Object>}
  */
-async function fetchActorRankings({ page = 1, limit = 20, request = defaultRequest } = {}) {
+async function fetchActorRankings({ page = 1, limit = 20, gender = 'all', request = defaultRequest } = {}) {
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const pageLimit = Math.max(1, Math.min(50, parseInt(limit, 10) || 20));
+  const validGender = ['male', 'female'].includes(String(gender).toLowerCase())
+    ? String(gender).toLowerCase()
+    : 'all';
   const now = Date.now();
 
   // 清理过期会话
@@ -231,9 +284,76 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
     }
   }
 
-  let session = sessionsByLimit.get(pageLimit);
+  const sessionKey = `${pageLimit}_${validGender}`;
 
-  // 1. 命中对应条数 limit 的内存缓存直接返回
+  // 1. 性别分类筛选 (male / female) 模式
+  if (validGender !== 'all') {
+    let genderSession = sessionsByLimit.get(sessionKey);
+    if (!genderSession || genderSession.expiresAt <= now) {
+      genderSession = {
+        limit: pageLimit,
+        gender: validGender,
+        expiresAt: Date.now() + CACHE_TTL_MS,
+        pool: [],
+        upstreamPage: 0,
+        upstreamHasMore: true,
+        rankDate: ''
+      };
+      sessionsByLimit.set(sessionKey, genderSession);
+    }
+
+    const neededCount = pageNum * pageLimit;
+    while (genderSession.pool.length < neededCount && genderSession.upstreamHasMore) {
+      const nextUpstreamPage = genderSession.upstreamPage + 1;
+      let upstreamRes;
+      try {
+        upstreamRes = await fetchActorRankings({ page: nextUpstreamPage, limit: 50, gender: 'all', request });
+      } catch (err) {
+        if (err.code === 'ACTOR_PAGE_OVERFLOW' || err.code === 'ACTOR_SCHEMA_ERROR') {
+          genderSession.upstreamHasMore = false;
+          break;
+        }
+        throw err;
+      }
+      genderSession.upstreamPage = nextUpstreamPage;
+      if (!genderSession.rankDate && upstreamRes.rank_date) {
+        genderSession.rankDate = upstreamRes.rank_date;
+      }
+      if (!upstreamRes.actors || upstreamRes.actors.length === 0 || !upstreamRes.has_more) {
+        genderSession.upstreamHasMore = false;
+      }
+      for (const actor of upstreamRes.actors) {
+        if (actor.gender === validGender && !genderSession.pool.some(a => a.actor_id === actor.actor_id)) {
+          genderSession.pool.push(actor);
+        }
+      }
+    }
+
+    const startIndex = (pageNum - 1) * pageLimit;
+    const pageActors = genderSession.pool.slice(startIndex, startIndex + pageLimit);
+    const hasMore = (genderSession.pool.length > startIndex + pageLimit) || genderSession.upstreamHasMore;
+
+    if (pageNum > 1 && pageActors.length === 0) {
+      throw actorError('已到达榜单末尾，无更多演员数据', 'ACTOR_PAGE_OVERFLOW', 400);
+    }
+
+    logger.info('HongguoActor', `成功获取剧星榜 (${validGender}): 第 ${pageNum} 页 (limit=${pageLimit}), 共 ${pageActors.length} 位演员, 统计截至=${genderSession.rankDate || '最新'}`);
+    return {
+      success: true,
+      actors: pageActors,
+      rank_date: genderSession.rankDate,
+      page: pageNum,
+      limit: pageLimit,
+      gender: validGender,
+      has_more: hasMore,
+      total: pageActors.length
+    };
+  }
+
+  // 2. 全部 (all) 模式
+  let session = sessionsByLimit.get(sessionKey);
+
+  // 2.1 命中对应条数 limit 的内存缓存直接返回
   if (session && session.expiresAt > now && session.pages.has(pageNum)) {
     const cached = session.pages.get(pageNum);
     logger.debug('HongguoActor', `命中剧星榜内存缓存: page=${pageNum}, limit=${pageLimit}`);
@@ -243,28 +363,29 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
       rank_date: cached.rankDate,
       page: pageNum,
       limit: pageLimit,
+      gender: 'all',
       has_more: cached.hasMore,
       total: cached.actors.length,
       from_cache: true
     };
   }
 
-  // 2. 若请求第 2 页及以上，但该 limit 下的会话已失效或游标未链式推进至 pageNum，顺序重构从第 1 页至 pageNum-1
+  // 2.2 若请求第 2 页及以上，但该 limit 下的会话已失效或游标未链式推进至 pageNum，顺序重构从第 1 页至 pageNum-1
   if (pageNum > 1 && (!session || session.expiresAt <= now || !session.pageOffsets?.has(pageNum))) {
     if (!session || session.expiresAt <= now) {
-      sessionsByLimit.delete(pageLimit);
+      sessionsByLimit.delete(sessionKey);
     }
     logger.info('HongguoActor', `剧星榜会话未就绪或未推进至第 ${pageNum} 页 (limit=${pageLimit})，从第 1 页顺序建立分页游标`);
     for (let p = 1; p < pageNum; p++) {
-      const stepRes = await fetchActorRankings({ page: p, limit: pageLimit, request });
+      const stepRes = await fetchActorRankings({ page: p, limit: pageLimit, gender: 'all', request });
       if (!stepRes.has_more) {
         throw actorError('已到达榜单末尾，无更多演员数据', 'ACTOR_PAGE_OVERFLOW', 400);
       }
     }
-    session = sessionsByLimit.get(pageLimit);
+    session = sessionsByLimit.get(sessionKey);
   }
 
-  // 3. 构建当前页请求参数
+  // 2.3 构建当前页请求参数
   let values;
   if (pageNum === 1 || !session) {
     values = {
@@ -313,10 +434,11 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
   const parsed = parseRankingPayload(payload, { pageNum, pageLimit, activeSession: session });
   const { actors, rankDate, hasMore, nextOffset, sessionId } = parsed;
 
-  // 4. 更新该 limit 的会话与游标映射
+  // 2.4 更新该 limit 的会话与游标映射
   if (!session || pageNum === 1) {
     session = {
       limit: pageLimit,
+      gender: 'all',
       sessionId,
       nextOffset,
       rankDate,
@@ -324,7 +446,7 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
       pages: new Map(),
       pageOffsets: new Map([[1, 0]])
     };
-    sessionsByLimit.set(pageLimit, session);
+    sessionsByLimit.set(sessionKey, session);
   } else {
     session.nextOffset = nextOffset;
     if (sessionId) session.sessionId = sessionId;
@@ -341,6 +463,7 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
     rank_date: rankDate,
     page: pageNum,
     limit: pageLimit,
+    gender: 'all',
     has_more: hasMore,
     total: actors.length
   };

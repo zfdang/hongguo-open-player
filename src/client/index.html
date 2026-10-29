@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
   <title>红果开源播放器 - Hongguo Open Player</title>
   <link rel="stylesheet" href="/css/app.css">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
@@ -65,6 +66,34 @@
           </div>
         </div>
 
+        <!-- 演员性别分类筛选条 -->
+        <div class="actor-filter-bar">
+          <span class="actor-filter-label">演员筛选：</span>
+          <div class="actor-filter-chips">
+            <button
+              class="actor-filter-chip"
+              :class="{ active: actorGender === 'all' }"
+              @click="switchActorGender('all')"
+            >
+              🌟 全部
+            </button>
+            <button
+              class="actor-filter-chip"
+              :class="{ active: actorGender === 'male' }"
+              @click="switchActorGender('male')"
+            >
+              👨 男演员
+            </button>
+            <button
+              class="actor-filter-chip"
+              :class="{ active: actorGender === 'female' }"
+              @click="switchActorGender('female')"
+            >
+              👩 女演员
+            </button>
+          </div>
+        </div>
+
         <!-- 演员骨架屏加载 -->
         <div v-if="loadingActors" class="actor-grid" aria-label="正在加载剧星榜" aria-busy="true">
           <div v-for="n in 8" :key="n" class="skeleton-actor-card" aria-hidden="true">
@@ -107,7 +136,7 @@
 
             <!-- 头像与人气 -->
             <div class="actor-avatar-wrapper">
-              <img :src="actor.avatar" :alt="actor.name" class="actor-avatar" loading="lazy" @error="onAvatarError" />
+              <img :src="actor.avatar" :alt="actor.name" class="actor-avatar" loading="lazy" referrerpolicy="no-referrer" @error="onAvatarError" />
             </div>
 
             <div class="actor-content">
@@ -362,7 +391,7 @@
       <div class="actor-modal" role="dialog" aria-modal="true" :aria-label="(activeActor.name || '演员') + '的主页与作品'">
         <div class="actor-modal-header">
           <div class="actor-profile-main">
-            <img :src="activeActor.avatar" :alt="activeActor.name" class="actor-profile-avatar" @error="onAvatarError" />
+            <img :src="activeActorDetail?.avatar || activeActor.avatar" :alt="activeActor.name" class="actor-profile-avatar" referrerpolicy="no-referrer" @error="onAvatarError" />
             <div class="actor-profile-meta">
               <div class="actor-profile-title-row">
                 <h2 class="actor-profile-name">{{ activeActor.name }}</h2>
@@ -383,7 +412,7 @@
                     @click="switchToRelatedActor(rel)"
                     :title="rel.intro || rel.name"
                   >
-                    <img :src="rel.avatar" :alt="rel.name" class="related-avatar" @error="onAvatarError" />
+                    <img :src="rel.avatar" :alt="rel.name" class="related-avatar" referrerpolicy="no-referrer" @error="onAvatarError" />
                     <span>{{ rel.name }}</span>
                   </button>
                 </div>
