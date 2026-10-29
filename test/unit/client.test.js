@@ -729,6 +729,34 @@ test('fullscreen auto-hide: controls hide when idle while playing, awaken on int
   assert.equal(bodyClasses.has('hide-cursor'), false);
 });
 
+test('theater sidebar toggle button toggles state and updates responsive button UI', () => {
+  const state = client(async () => response([]));
+  state.mountForTest();
+  assert.equal(state.sidebarOpen.value, true);
+
+  // Toggle sidebar
+  state.sidebarOpen.value = !state.sidebarOpen.value;
+  assert.equal(state.sidebarOpen.value, false);
+
+  // Toggle back
+  state.sidebarOpen.value = !state.sidebarOpen.value;
+  assert.equal(state.sidebarOpen.value, true);
+});
+
+test('index.html layout places favorite button to the left of sidebar-toggle-btn with state icons', () => {
+  const path = require('node:path');
+  const html = fs.readFileSync(path.resolve(__dirname, '../../src/client/index.html'), 'utf-8');
+  assert.ok(html.includes('class="player-actions"'));
+  
+  const favIndex = html.indexOf('class="fav-action-btn"');
+  const toggleIndex = html.indexOf('class="sidebar-toggle-btn"');
+  assert.ok(favIndex !== -1 && toggleIndex !== -1, 'Both buttons must exist');
+  assert.ok(favIndex < toggleIndex, 'Favorite button must be on the left, sidebar toggle on the right');
+  
+  assert.ok(html.includes('sidebar-toggle-icon'));
+  assert.ok(html.includes("sidebarOpen ? '收起选集' : '展开选集'"));
+});
+
 
 
 

@@ -540,6 +540,12 @@ html.platform-mac .app-header {
   font-weight: 600;
 }
 
+.player-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .fav-action-btn {
   background: transparent;
   border: 1px solid var(--border-color);
@@ -548,13 +554,60 @@ html.platform-mac .app-header {
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13px;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.fav-action-btn:hover {
+  color: #fff;
+  border-color: var(--text-sub);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .fav-action-btn.favorited {
   color: var(--accent);
   border-color: var(--accent);
   background: rgba(255, 51, 85, 0.1);
+}
+
+.sidebar-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-sub);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.sidebar-toggle-btn:hover {
+  color: #fff;
+  border-color: var(--text-sub);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-toggle-btn.active {
+  color: var(--text-main);
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-toggle-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: block;
+}
+
+.sidebar-toggle-label {
+  display: inline-block;
+  line-height: 1;
 }
 
 /* 视频播放器舞台 (智能自适应画幅：横屏 16:9 / 竖屏 9:16 均按最大视口等比铺满) */

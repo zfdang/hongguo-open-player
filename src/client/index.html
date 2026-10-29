@@ -233,11 +233,31 @@
               <span class="playing-ep-badge">第 {{ activeEpisodeIndex }} 集 / 全 {{ activeSeries?.total || activeEpisodes.length }} 集</span>
             </div>
             <div class="player-actions">
-              <button class="back-btn" :class="{ active: sidebarOpen }" @click="sidebarOpen = !sidebarOpen" :aria-expanded="sidebarOpen" aria-controls="episode-sidebar">
-                {{ sidebarOpen ? '收起选集' : '展开选集' }}
-              </button>
-              <button class="fav-action-btn" :class="{ favorited: isFavorited }" @click="toggleFavCurrent">
+              <button class="fav-action-btn" :class="{ favorited: isFavorited }" @click="toggleFavCurrent" :title="isFavorited ? '取消收藏' : '收藏此剧'">
                 {{ isFavorited ? '❤️ 已收藏' : '🤍 收藏' }}
+              </button>
+              <button 
+                class="sidebar-toggle-btn" 
+                :class="{ active: sidebarOpen }" 
+                @click="sidebarOpen = !sidebarOpen" 
+                :aria-expanded="sidebarOpen" 
+                aria-controls="episode-sidebar" 
+                :title="sidebarOpen ? '收起右侧选集面板' : '展开右侧选集面板'"
+              >
+                <!-- 展开状态：右侧栏高亮 + 向右收起箭头 -->
+                <svg v-if="sidebarOpen" class="sidebar-toggle-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                  <rect width="13" height="11" x="1.5" y="2.5" rx="1.5"/>
+                  <path d="M10 2.5v11"/>
+                  <path d="M10 2.5h3a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-3z" fill="currentColor" fill-opacity="0.25" stroke="none"/>
+                  <path d="m5.5 6.5 1.75 1.5-1.75 1.5"/>
+                </svg>
+                <!-- 收起状态：右侧栏虚线 + 向左拉出箭头 -->
+                <svg v-else class="sidebar-toggle-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                  <rect width="13" height="11" x="1.5" y="2.5" rx="1.5"/>
+                  <path d="M10 2.5v11" stroke-dasharray="1.5 1.5"/>
+                  <path d="m7.25 6.5-1.75 1.5 1.75 1.5"/>
+                </svg>
+                <span class="sidebar-toggle-label">{{ sidebarOpen ? '收起选集' : '展开选集' }}</span>
               </button>
             </div>
           </div>
