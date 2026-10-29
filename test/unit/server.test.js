@@ -60,9 +60,13 @@ test('loopback API blocks foreign origins and hosts and returns JSON errors', as
   assert.equal(home.headers.get('x-content-type-options'), 'nosniff');
   assert.match(home.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   assert.equal((await fetch(`${base}/api/history`)).status, 401);
-  const Cookie = home.headers.get('set-cookie').split(';')[0];
+  assert.equal((await fetch(`${base}/API/history`)).status, 401);
+  assert.equal((await fetch(`${base}/Api/History`)).status, 401);
+  const rawSetCookie = home.headers.get('set-cookie');
+  const Cookie = rawSetCookie.split(';')[0];
   const apiFetch = (url, options = {}) => fetch(url, { ...options, headers: { Cookie, ...options.headers } });
   assert.equal((await apiFetch(`${base}/api/history`)).status, 200);
+  assert.equal((await apiFetch(`${base}/API/history`)).status, 200);
   assert.equal((await apiFetch(`${base}/api/history`, { headers: { Origin: base } })).status, 200);
   for (const headers of [{ Origin: 'https://evil.example' }, { Host: `evil.example:${port}` }, { 'Sec-Fetch-Site': 'cross-site' }]) {
     const status = await new Promise((resolve, reject) => {
@@ -88,4 +92,27 @@ test('API exceptions do not expose filesystem or upstream request details', asyn
   const response = await fetch(`${base}/api/series/1`, { headers: { Cookie: home.headers.get('set-cookie').split(';')[0] } });
   assert.equal(response.status, 500);
   assert.equal((await response.json()).error, '操作失败，请稍后重试');
+});
+
+test('servers on different ports isolate cookies via port-specific cookie names', async t => {
+  const s1 = await startServer(0);
+  t.after(() => new Promise(resolve => s1.server.close(resolve)));
+  const s2 = await startServer(0);
+  t.after(() => new Promise(resolve => s2.server.close(resolve)));
+
+  const home1 = await fetch(`http://127.0.0.1:${s1.port}`);
+  const home2 = await fetch(`http://127.0.0.1:${s2.port}`);
+
+  const cookies1 = typeof home1.headers.getSetCookie === 'function' ? home1.headers.getSetCookie() : [home1.headers.get('set-cookie')];
+  const portCookie1 = cookies1.find(c => c.startsWith(`player_session_${s1.port}=`))?.split(';')[0];
+  assert.ok(portCookie1, `Must set port-specific cookie player_session_${s1.port}`);
+
+  const cookies2 = typeof home2.headers.getSetCookie === 'function' ? home2.headers.getSetCookie() : [home2.headers.get('set-cookie')];
+  const s2GenericToken = cookies2.find(c => c.startsWith('player_session='))?.split(';')[0];
+
+  const browserCookieHeader = `${s2GenericToken}; ${portCookie1}`;
+  const res1 = await fetch(`http://127.0.0.1:${s1.port}/api/history`, {
+    headers: { Cookie: browserCookieHeader }
+  });
+  assert.equal(res1.status, 200);
 });

@@ -18,6 +18,7 @@ createApp({
     const currentDramas = ref([]);
     const currentPage = ref(1);
     const loadingCatalog = ref(false);
+    const catalogError = ref(null);
     const hasMore = ref(false);
     let catalogRequest = 0;
     let submittedKeyword = '';
@@ -162,6 +163,7 @@ createApp({
     async function loadCatalog() {
       const request = ++catalogRequest;
       loadingCatalog.value = true;
+      catalogError.value = null;
       try {
         const tab = currentTab.value;
         let url;
@@ -187,6 +189,7 @@ createApp({
       } catch (err) {
         if (request !== catalogRequest) return;
         console.error('加载短剧列表失败:', err);
+        catalogError.value = err.message || '加载短剧列表失败，请重试';
         currentDramas.value = [];
         hasMore.value = false;
       } finally {
@@ -199,6 +202,7 @@ createApp({
       submittedKeyword = searchKeyword.value.trim();
       currentTab.value = 'search';
       currentPage.value = 1;
+      catalogError.value = null;
       leaveTheater();
       return loadCatalog();
     }
@@ -210,6 +214,7 @@ createApp({
 
     function switchTab(tab) {
       currentTab.value = tab;
+      catalogError.value = null;
       leaveTheater();
       closeActorDetail();
       searchKeyword.value = '';
@@ -294,8 +299,11 @@ createApp({
       window.scrollTo?.({ top: 0, behavior: 'smooth' });
     }
 
+    let lastFocusedBeforeActorModal = null;
+
     async function openActorDetail(actor) {
       if (!actor || !actor.actor_id) return;
+      lastFocusedBeforeActorModal = typeof document !== 'undefined' ? document.activeElement : null;
       const requestId = ++currentActorRequestId;
       const targetActorId = String(actor.actor_id);
 
@@ -309,6 +317,14 @@ createApp({
       loadingMoreWorks.value = false;
       actorWorksError.value = '';
       reportClientLog('INFO', `打开演员主页: ${actor.name} (actorId=${targetActorId})`);
+
+      nextTick(() => {
+        if (typeof document?.querySelector === 'function') {
+          const modal = document.querySelector('.actor-modal');
+          const closeBtn = document.querySelector('.modal-close-btn');
+          (closeBtn || modal)?.focus?.();
+        }
+      });
 
       try {
         const [detailRes, worksRes] = await Promise.allSettled([
@@ -441,6 +457,40 @@ createApp({
       actorWorksError.value = '';
       loadingActorWorks.value = false;
       loadingMoreWorks.value = false;
+      if (lastFocusedBeforeActorModal && typeof lastFocusedBeforeActorModal.focus === 'function') {
+        try { lastFocusedBeforeActorModal.focus(); } catch (_) {}
+      }
+      lastFocusedBeforeActorModal = null;
+    }
+
+    function onActorModalKeydown(e) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        e.preventDefault();
+        closeActorDetail();
+        return;
+      }
+      if (e.key === 'Tab' && typeof document?.querySelector === 'function') {
+        const modal = document.querySelector('.actor-modal');
+        if (!modal) return;
+        const focusables = Array.from(modal.querySelectorAll(
+          'button:not([disabled]), [tabindex]:not([tabindex="-1"]), a[href], input:not([disabled])'
+        )).filter(el => el.offsetParent !== null);
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first || !modal.contains(document.activeElement)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last || !modal.contains(document.activeElement)) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
     }
 
     function switchToRelatedActor(rel) {
@@ -1061,7 +1111,9 @@ createApp({
       switchToRelatedActor,
       playActorWork,
       getRankChangeClass,
-      onAvatarError
+      onAvatarError,
+      catalogError,
+      onActorModalKeydown
     };
   }
 }).mount('#app');

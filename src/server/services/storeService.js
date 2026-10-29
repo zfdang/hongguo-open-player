@@ -12,7 +12,41 @@ class StoreService {
       favorites: Object.create(null) // series_id -> { series_id, series_title, cover, updated_at }
     };
     this.pending = Promise.resolve();
+    this.lastLoadedMtime = 0;
     this.init();
+  }
+
+  readDiskState() {
+    for (const file of [this.dataFile, `${this.dataFile}.bak`]) {
+      if (!fs.existsSync(file)) continue;
+      try {
+        const stats = fs.statSync(file);
+        const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (parsed && typeof parsed === 'object' && ['history', 'favorites'].every(field => parsed[field] && typeof parsed[field] === 'object' && !Array.isArray(parsed[field]))) {
+          return {
+            history: Object.assign(Object.create(null), parsed.history),
+            favorites: Object.assign(Object.create(null), parsed.favorites),
+            mtimeMs: stats.mtimeMs
+          };
+        }
+      } catch {}
+    }
+    return null;
+  }
+
+  reloadDiskStateIfNeeded() {
+    try {
+      if (!fs.existsSync(this.dataFile)) return;
+      const stat = fs.statSync(this.dataFile);
+      if (stat.mtimeMs !== this.lastLoadedMtime) {
+        const disk = this.readDiskState();
+        if (disk) {
+          this.state = { history: disk.history, favorites: disk.favorites };
+          this.lastLoadedMtime = disk.mtimeMs;
+          this.loadError = null;
+        }
+      }
+    } catch {}
   }
 
   init() {
@@ -20,9 +54,11 @@ class StoreService {
     for (const file of [this.dataFile, `${this.dataFile}.bak`]) {
       if (!fs.existsSync(file)) continue;
       try {
+        const stats = fs.statSync(file);
         const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
         if (!parsed || ['history', 'favorites'].some(field => !parsed[field] || typeof parsed[field] !== 'object' || Array.isArray(parsed[field]))) throw new Error('Invalid user data');
         for (const field of ['history', 'favorites']) this.state[field] = Object.assign(Object.create(null), parsed[field]);
+        this.lastLoadedMtime = stats.mtimeMs;
         this.loadError = null;
         return;
       } catch (error) {
@@ -52,6 +88,10 @@ class StoreService {
       await this.rename(backupTemp, `${this.dataFile}.bak`);
       await this.rename(tempFile, this.dataFile);
       this.state = nextState;
+      try {
+        const stat = await fs.promises.stat(this.dataFile);
+        this.lastLoadedMtime = stat.mtimeMs;
+      } catch {}
     } finally {
       await Promise.allSettled([tempFile, backupTemp].map(file => fs.promises.rm(file, { force: true })));
     }
@@ -59,6 +99,7 @@ class StoreService {
 
   mutate(update) {
     const task = this.pending.catch(() => {}).then(async () => {
+      this.reloadDiskStateIfNeeded();
       const { state, result } = update(this.state);
       await this.save(state);
       return result;
@@ -103,6 +144,7 @@ class StoreService {
    * 获取观影历史（按更新时间倒序）
    */
   getHistory() {
+    this.reloadDiskStateIfNeeded();
     return Object.values(this.state.history).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
   }
 
@@ -111,6 +153,7 @@ class StoreService {
    */
   getSeriesProgress(seriesId) {
     if (!seriesId) return null;
+    this.reloadDiskStateIfNeeded();
     return Object.hasOwn(this.state.history, String(seriesId)) ? this.state.history[String(seriesId)] : null;
   }
 
@@ -136,6 +179,7 @@ class StoreService {
    * 获取所有收藏
    */
   getFavorites() {
+    this.reloadDiskStateIfNeeded();
     return Object.values(this.state.favorites).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
   }
 
@@ -143,6 +187,7 @@ class StoreService {
    * 判断单剧是否已收藏
    */
   isFavorite(seriesId) {
+    this.reloadDiskStateIfNeeded();
     return Object.hasOwn(this.state.favorites, String(seriesId));
   }
 }

@@ -2,7 +2,7 @@
 const axios = require('axios');
 const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
-const { prepareRangeMedia } = require('./rangeMedia');
+const rangeMedia = require('./rangeMedia');
 const appSource = require('../native/app-source');
 const { decryptMp4Buffer } = require('../native/hongguo');
 const { normalizeDownloadQuality } = require('../native/download-quality');
@@ -317,10 +317,11 @@ class StreamService {
     logger.info('StreamService', `开始构建流式分片播放计划: vid=${vid}, quality=${quality}`);
     const info = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, signal });
     let lastError;
+    let hasRangeUnsupported = false;
     for (const variant of info.variants?.length ? info.variants : [info]) {
       signal.throwIfAborted();
       try {
-        const plan = await prepareRangeMedia({ ...variant, contentKey: variant.contentKey || info.contentKey }, this.requestOptions, signal);
+        const plan = await rangeMedia.prepareRangeMedia({ ...variant, contentKey: variant.contentKey || info.contentKey }, this.requestOptions, signal);
         logger.info('StreamService', `流式分片计划构建完成: vid=${vid}, 大小=${plan.size} 字节, 耗时=${Date.now() - t0}ms`);
         this.plans.set(key, { plan, expires: Date.now() + 90000 });
         while (this.plans.size > 8 || [...this.plans.values()].reduce((sum, item) => sum + item.plan.bytes, 0) > this.maxPlanBytes) {
@@ -329,12 +330,17 @@ class StreamService {
         return plan;
       } catch (error) {
         if (error.code === 'RANGE_UNSUPPORTED') {
-          logger.warn('StreamService', `CDN节点不支持Range，回退至内存缓冲模式: vid=${vid}`);
-          return null;
+          hasRangeUnsupported = true;
+          logger.warn('StreamService', `CDN节点不支持Range，尝试下一个候选: vid=${vid}`);
+          continue;
         }
         lastError = error;
         logger.warn('StreamService', `候选CDN节点异常，尝试下一个候选: ${error.message}`);
       }
+    }
+    if (hasRangeUnsupported) {
+      logger.warn('StreamService', `所有候选CDN节点均不支持Range，回退至内存缓冲模式: vid=${vid}`);
+      return null;
     }
     throw lastError || new Error('视频源不可用');
   }
@@ -348,9 +354,14 @@ class StreamService {
     const disconnected = () => { if (!res.writableEnded) controller.abort(new Error('Playback disconnected')); };
     res.once?.('close', disconnected);
     const t0 = Date.now();
+    const quality = normalizeDownloadQuality(req.query?.quality || 'auto');
+    const planKey = `${vid}:${quality}`;
     try {
-      const quality = normalizeDownloadQuality(req.query?.quality || 'auto');
       logger.info('StreamService', `收到流媒体Range请求: vid=${vid}, Range=${req.headers.range || '全量'}, quality=${quality}`);
+      if (this.cache.has(planKey) || this.cache.has(String(vid))) {
+        logger.info('StreamService', `命中完整视频内存缓存，直接进入缓冲分片播放: vid=${vid}, quality=${quality}`);
+        return await this.handleBufferedStream(req, res, vid);
+      }
       const plan = await this.getStreamingPlan(vid, quality, controller.signal);
       if (!plan) return await this.handleBufferedStream(req, res, vid);
       const total = plan.size;
@@ -378,11 +389,21 @@ class StreamService {
       logger.info('StreamService', `流式分片传输完成: vid=${vid}, 区间=${start}-${end}/${total}, 耗时=${Date.now() - t0}ms`);
       this.prefetch(req.query?.next_vid, quality, true);
     } catch (error) {
-      this.plans.delete(`${vid}:${req.query?.quality || 'auto'}`);
-      logger.error('StreamService', `流媒体播放异常 vid=${vid}: ${error.message}`);
-      if (!res.destroyed) {
-        if (!res.headersSent) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: '视频源加载失败，请稍后重试' })); }
-        else res.destroy(error);
+      const isClientAbort = controller.signal.aborted ||
+        error.name === 'AbortError' ||
+        error.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+        error.code === 'ECONNRESET' ||
+        error.message === 'Playback disconnected';
+
+      if (!isClientAbort) {
+        this.plans.delete(planKey);
+        logger.error('StreamService', `流媒体播放异常 vid=${vid}: ${error.message}`);
+        if (!res.destroyed) {
+          if (!res.headersSent) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: '视频源加载失败，请稍后重试' })); }
+          else res.destroy(error);
+        }
+      } else {
+        logger.info('StreamService', `客户端断开连接 (Seek/切集): vid=${vid}`);
       }
     } finally {
       res.removeListener?.('close', disconnected);

@@ -45,7 +45,7 @@
     </header>
 
     <!-- 主体内容区域 -->
-    <main class="app-main">
+    <main class="app-main" :inert="activeActor ? true : undefined" :aria-hidden="activeActor ? 'true' : undefined">
       <!-- 快捷搜索推荐标签 -->
       <section v-if="viewMode === 'catalog' && currentTab !== 'history' && currentTab !== 'favorites' && currentTab !== 'actors'" class="chips-bar">
         <span class="chips-label">热门搜索：</span>
@@ -173,11 +173,19 @@
           </div>
         </div>
 
+        <!-- 加载错误状态与重试 -->
+        <div v-else-if="catalogError" class="empty-state error-state">
+          <span class="empty-icon">⚠️</span>
+          <h3>短剧加载失败</h3>
+          <p>{{ catalogError }}</p>
+          <button class="retry-btn" @click="loadCatalog" style="margin-top: 14px; padding: 8px 20px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: #fff; cursor: pointer;">重试加载</button>
+        </div>
+
         <!-- 列表空状态 -->
         <div v-else-if="currentDramas.length === 0" class="empty-state">
           <span class="empty-icon">📺</span>
-          <h3>暂无相关短剧内容</h3>
-          <p>换个搜索关键词，或者切换分类标签试试吧</p>
+          <h3>{{ currentTab === 'history' ? '暂无观看历史' : currentTab === 'favorites' ? '暂无收藏短剧' : '暂无相关短剧内容' }}</h3>
+          <p>{{ currentTab === 'history' ? '播放过的短剧会显示在这里' : currentTab === 'favorites' ? '点击短剧海报旁的“收藏”即可快速添加' : currentTab === 'search' ? '未找到相关短剧，换个搜索关键词试试吧' : '换个搜索关键词，或者切换分类标签试试吧' }}</p>
         </div>
 
         <!-- 卡片网格 -->
@@ -387,8 +395,8 @@
     </main>
 
     <!-- 演员个人主页与参演短剧弹窗 -->
-    <div v-if="activeActor" class="actor-modal-overlay" @click.self="closeActorDetail">
-      <div class="actor-modal" role="dialog" aria-modal="true" :aria-label="(activeActor.name || '演员') + '的主页与作品'">
+    <div v-if="activeActor" class="actor-modal-overlay" @click.self="closeActorDetail" @keydown="onActorModalKeydown">
+      <div class="actor-modal" role="dialog" aria-modal="true" tabindex="-1" :aria-label="(activeActor.name || '演员') + '的主页与作品'">
         <div class="actor-modal-header">
           <div class="actor-profile-main">
             <img :src="activeActorDetail?.avatar || activeActor.avatar" :alt="activeActor.name" class="actor-profile-avatar" referrerpolicy="no-referrer" @error="onAvatarError" />

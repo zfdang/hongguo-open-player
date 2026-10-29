@@ -605,5 +605,24 @@ test('switching actor gender reloads rankings with gender query and discards sta
   assert.equal(state.actorGender.value, 'female');
 });
 
+test('catalog loading failure sets catalogError and retrying clears it', async () => {
+  let shouldFail = true;
+  const state = client(async () => {
+    if (shouldFail) return { ok: false, status: 503, json: async () => ({ error: '服务暂时不可用' }) };
+    return response({ results: [{ series_id: '100', series_title: '成功剧目' }], hasMore: false });
+  });
+
+  await state.loadCatalog();
+  assert.equal(state.currentDramas.value.length, 0);
+  assert.match(state.catalogError.value, /加载失败 \(503\)/);
+
+  // Now retry
+  shouldFail = false;
+  await state.loadCatalog();
+  assert.equal(state.catalogError.value, null);
+  assert.equal(state.currentDramas.value.length, 1);
+  assert.equal(state.currentDramas.value[0].series_id, '100');
+});
+
 
 

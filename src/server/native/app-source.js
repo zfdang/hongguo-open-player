@@ -275,7 +275,8 @@ async function requestJson(url, options, deadline, signal) {
                 validateStatus: () => true,
             });
         } catch (error) {
-            const code = signal.aborted ? 'ETIMEDOUT' : ['ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
+            const isAborted = Boolean(signal?.aborted);
+            const code = isAborted ? 'ETIMEDOUT' : ['ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
                 'ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'ERR_CANCELED'].includes(error.code) ? error.code : 'ERR_NETWORK';
             throw Object.assign(new Error(['ECONNABORTED', 'ETIMEDOUT'].includes(code)
                 ? 'App 片源请求超时' : 'App 片源网络请求失败，请稍后重试'), { code });

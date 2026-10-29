@@ -19,7 +19,6 @@ if not exist node_modules (
 )
 
 echo 🚀 启动服务并打开播放器界面...
-start http://127.0.0.1:8899
-node src/server/index.js
+node src/server/index.js --open
 
 pause

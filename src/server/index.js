@@ -34,10 +34,18 @@ app.use((req, res, next) => {
   next();
 });
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api/')) {
+  const normalizedPath = req.path.toLowerCase();
+  const port = req.socket?.localPort;
+  const portCookieName = port ? `player_session_${port}` : null;
+  if (normalizedPath.startsWith('/api/')) {
     const cookies = String(req.headers.cookie || '').split(';').map(value => value.trim());
-    if (!cookies.includes(`player_session=${sessionToken}`)) return res.status(401).json({ error: '请从播放器首页建立本地会话' });
-  } else if (req.path === '/' || req.path === '/index.html') {
+    const hasValidSession = (portCookieName && cookies.includes(`${portCookieName}=${sessionToken}`)) ||
+                            cookies.includes(`player_session=${sessionToken}`);
+    if (!hasValidSession) return res.status(401).json({ error: '请从播放器首页建立本地会话' });
+  } else if (normalizedPath === '/' || normalizedPath === '/index.html') {
+    if (portCookieName) {
+      res.cookie(portCookieName, sessionToken, { httpOnly: true, sameSite: 'strict', path: '/' });
+    }
     res.cookie('player_session', sessionToken, { httpOnly: true, sameSite: 'strict', path: '/' });
     res.set('Cache-Control', 'no-store');
   }
@@ -47,7 +55,7 @@ app.use(express.json({ limit: '64kb' }));
 
 // 核心 API 请求访问与耗时日志中间件 (用于日常排错与运行诊断)
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api/')) {
+  if (req.path.toLowerCase().startsWith('/api/')) {
     const t0 = Date.now();
     res.on('finish', () => {
       const duration = Date.now() - t0;
@@ -301,7 +309,17 @@ async function startServer(preferredPort = PORT) {
 
 // CLI 直接运行模式
 if (require.main === module) {
-  startServer().catch((err) => {
+  startServer().then(({ port }) => {
+    if (process.argv.includes('--open') || process.env.HONGGUO_AUTO_OPEN === '1') {
+      const url = `http://127.0.0.1:${port}`;
+      const cmd = process.platform === 'darwin' ? `open "${url}"` :
+                  process.platform === 'win32' ? `start "" "${url}"` :
+                  `xdg-open "${url}"`;
+      require('child_process').exec(cmd, (err) => {
+        if (err) logger.warn('Server', `无法自动打开浏览器: ${err.message}`);
+      });
+    }
+  }).catch((err) => {
     console.error('启动服务失败:', err);
     process.exit(1);
   });

@@ -48,3 +48,25 @@ test('store serializes writes, retries Windows locks and recovers a corrupt prim
   await recovered.updateProgress({ series_id: '3' });
   assert.equal(new Store(dir).getHistory().length, 2);
 });
+
+test('multiple store instances sharing dataDir do not overwrite each other history or favorites', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'player-multi-store-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  // Two instances started with empty directory (e.g. two server processes)
+  const storeA = new Store(dir);
+  const storeB = new Store(dir);
+
+  // Store A writes progress for series 100
+  await storeA.updateProgress({ series_id: '100', series_title: '剧目A', position_sec: 14 });
+
+  // Store B toggles favorite for series 200
+  await storeB.toggleFavorite({ series_id: '200', series_title: '剧目B' });
+
+  // Verify that storeB did not overwrite storeA's history
+  const storeC = new Store(dir);
+  assert.equal(storeC.getSeriesProgress('100')?.position_sec, 14);
+  assert.equal(storeC.isFavorite('200'), true);
+  assert.equal(storeA.isFavorite('200'), true);
+  assert.equal(storeB.getSeriesProgress('100')?.position_sec, 14);
+});

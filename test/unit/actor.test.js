@@ -397,6 +397,24 @@ test('fetchActorRankings filters by gender (male, female) and isolates paginatio
   assert.equal(allRes.success, true);
   assert.equal(allRes.gender, 'all');
   assert.equal(allRes.actors.length, 4);
+
+  // 4. Verify 李柯以 is classified as female
+  const { parseRankingPayload } = require('../../src/server/native/hongguo-actor');
+  const payloadWithLiKeyi = {
+    code: 0,
+    data: {
+      cell_view: {
+        cell_data: [{
+          ugc_user_data: [{
+            user_info: { base_info: { actor_id_str: '7429227723668591897', user_name: '李柯以' } },
+            intro: '中国内地女演员'
+          }]
+        }]
+      }
+    }
+  };
+  const parsedLi = parseRankingPayload(payloadWithLiKeyi);
+  assert.equal(parsedLi.actors[0].gender, 'female');
 });
 
 test('fetchActorDetail and fetchActorWorks parse profiles, related actors and drama works', async () => {
