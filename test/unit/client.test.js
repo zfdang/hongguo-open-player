@@ -624,5 +624,83 @@ test('catalog loading failure sets catalogError and retrying clears it', async (
   assert.equal(state.currentDramas.value[0].series_id, '100');
 });
 
+test('fullscreen auto-hide: controls hide when idle while playing, awaken on interaction, and stay visible when paused or scrubbing', async () => {
+  let timerFn = null;
+  let timerMs = 0;
+  let timerCleared = false;
+
+  const mockSetTimeout = (fn, ms) => {
+    timerFn = fn;
+    timerMs = ms;
+    timerCleared = false;
+    return 123;
+  };
+  const mockClearTimeout = () => {
+    timerCleared = true;
+    timerFn = null;
+  };
+
+  const state = client(async () => response([]), {
+    setTimeout: mockSetTimeout,
+    clearTimeout: mockClearTimeout,
+    document: {
+      fullscreenElement: null,
+      documentElement: { classList: { add() {} } },
+      addEventListener() {},
+      removeEventListener() {}
+    }
+  });
+
+  // Initially not fullscreen, not playing
+  assert.equal(state.isFullscreen.value, false);
+  assert.equal(state.isControlsHidden.value, false);
+
+  // 1. Enter fullscreen while playing
+  state.isFullscreen.value = true;
+  state.isPlaying.value = true;
+  state.resetControlsTimer();
+
+  assert.equal(timerMs, 2500, 'Controls timer should be set to 2.5s');
+  assert.ok(typeof timerFn === 'function');
+  assert.equal(state.isControlsHidden.value, false);
+
+  // Fire the timer -> controls should hide
+  timerFn();
+  assert.equal(state.isControlsHidden.value, true, 'Controls should hide after timer fires');
+
+  // 2. User moves mouse / interacts -> resetControlsTimer awakens controls immediately
+  state.resetControlsTimer();
+  assert.equal(state.isControlsHidden.value, false, 'Controls should awaken on user interaction');
+
+  // 3. User pauses video -> controls must not hide
+  state.onPause();
+  assert.equal(state.isControlsHidden.value, false);
+  assert.ok(timerCleared, 'Timer should be cleared when paused');
+
+  // Calling resetControlsTimer while paused should not set a timer
+  timerFn = null;
+  state.resetControlsTimer();
+  assert.equal(timerFn, null, 'Should not set hide timer while paused');
+
+  // 4. User starts scrubbing -> controls must not hide
+  state.isPlaying.value = true;
+  state.startScrubbing({ target: {} });
+  assert.equal(state.isScrubbing.value, true);
+  state.resetControlsTimer();
+  assert.equal(timerFn, null, 'Should not set hide timer while scrubbing');
+
+  // Finish scrubbing -> resets timer
+  state.finishScrubbing({});
+  assert.equal(state.isScrubbing.value, false);
+  assert.equal(timerMs, 2500);
+
+  // 5. Exiting fullscreen clears timer and shows controls
+  state.isFullscreen.value = false;
+  state.clearControlsTimer();
+  assert.ok(timerCleared);
+  assert.equal(state.isControlsHidden.value, false);
+});
+
+
 
 

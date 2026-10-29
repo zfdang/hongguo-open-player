@@ -69,9 +69,30 @@ createApp({
     let toastTimer, osdTimer;
     const sidebarOpen = ref(true);
     const isScrubbing = ref(false);
+    const isFullscreen = ref(false);
+    const isControlsHidden = ref(false);
+    let controlsHideTimer = null;
     const previewTime = ref(0);
     const previewPercent = ref(0);
     const showPreview = ref(false);
+
+    function clearControlsTimer() {
+      clearTimeout(controlsHideTimer);
+    }
+
+    function resetControlsTimer() {
+      if (isControlsHidden.value) {
+        isControlsHidden.value = false;
+      }
+      clearTimeout(controlsHideTimer);
+      if (isFullscreen.value && isPlaying.value && !isScrubbing.value) {
+        controlsHideTimer = setTimeout(() => {
+          if (isFullscreen.value && isPlaying.value && !isScrubbing.value) {
+            isControlsHidden.value = true;
+          }
+        }, 2500);
+      }
+    }
     function previewSeek(event) {
       const rect = event.currentTarget.getBoundingClientRect();
       const fraction = rect.width ? Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) : 0;
@@ -87,6 +108,8 @@ createApp({
     }
     function startScrubbing(event) {
       isScrubbing.value = true;
+      isControlsHidden.value = false;
+      clearTimeout(controlsHideTimer);
       event.target.setPointerCapture?.(event.pointerId);
     }
     function finishScrubbing(event) {
@@ -95,6 +118,7 @@ createApp({
       saveProgressNow();
       event?.target?.blur?.();
       keepPlayerFocus();
+      resetControlsTimer();
     }
     function notify(message) {
       toastText.value = message;
@@ -107,7 +131,15 @@ createApp({
       osdTimer = setTimeout(() => { osdMessage.value = ''; }, 1000);
     }
     function fullscreenChanged() {
-      if (!document.fullscreenElement) fullscreenExitAt = Date.now();
+      const active = Boolean(typeof document !== 'undefined' && document.fullscreenElement);
+      isFullscreen.value = active;
+      if (!active) {
+        fullscreenExitAt = Date.now();
+        isControlsHidden.value = false;
+        clearTimeout(controlsHideTimer);
+      } else {
+        resetControlsTimer();
+      }
     }
     function reportClientLog(level, message, extra) {
       try {
@@ -536,6 +568,8 @@ createApp({
       saveProgressNow();
       if (videoEl.value) videoEl.value.pause();
       resetPlayback();
+      isControlsHidden.value = false;
+      clearTimeout(controlsHideTimer);
       viewMode.value = 'catalog';
       if (navigator.mediaSession) { navigator.mediaSession.playbackState = 'none'; navigator.mediaSession.metadata = null; }
     }
@@ -764,6 +798,7 @@ createApp({
       if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing';
       isBuffering.value = false;
       reportClientLog('INFO', `播放器起播: 《${activeSeries.value?.series_title || ''}》 第 ${activeEpisodeIndex.value} 集`);
+      resetControlsTimer();
     }
 
     function onCanPlay(event) {
@@ -776,6 +811,8 @@ createApp({
       isPlaying.value = false;
       if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused';
       saveProgressNow();
+      isControlsHidden.value = false;
+      clearTimeout(controlsHideTimer);
     }
 
     function onLoadedMetadata(event) {
@@ -920,6 +957,7 @@ createApp({
       }
 
       if (viewMode.value === 'theater') {
+        resetControlsTimer();
         const isSpace = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar' || e.key?.toLowerCase() === 'k';
         if (isSpace) {
           e.preventDefault();
@@ -1017,6 +1055,7 @@ createApp({
       window.removeEventListener('pagehide', saveProgressNow);
       document.removeEventListener?.('fullscreenchange', fullscreenChanged);
       clearTimeout(toastTimer); clearTimeout(osdTimer);
+      clearTimeout(controlsHideTimer);
       if (navigator.mediaSession) for (const name of ['play', 'pause', 'previoustrack', 'nexttrack']) {
         try { navigator.mediaSession.setActionHandler(name, null); } catch (_) {}
       }
@@ -1025,6 +1064,7 @@ createApp({
 
     return {
       toastText, osdMessage, sidebarOpen, isScrubbing, previewTime, previewPercent, showPreview,
+      isFullscreen, isControlsHidden, resetControlsTimer, clearControlsTimer,
       previewSeek, seekFromSlider, startScrubbing, finishScrubbing,
       viewMode,
       currentTab,
