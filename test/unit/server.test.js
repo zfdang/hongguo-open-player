@@ -116,3 +116,21 @@ test('servers on different ports isolate cookies via port-specific cookie names'
   });
   assert.equal(res1.status, 200);
 });
+
+test('all GitHub Actions workflow files are valid YAML', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const jsyaml = require('js-yaml');
+  const workflowsDir = path.resolve(__dirname, '../../.github/workflows');
+  if (fs.existsSync(workflowsDir)) {
+    const files = fs.readdirSync(workflowsDir).filter(f => f.endsWith('.yml') || f.endsWith('.yaml'));
+    assert.ok(files.length > 0, 'Must have at least one workflow file');
+    for (const file of files) {
+      const fullPath = path.join(workflowsDir, file);
+      const content = fs.readFileSync(fullPath, 'utf8');
+      const parsed = jsyaml.load(content);
+      assert.ok(parsed && typeof parsed === 'object', `Workflow ${file} must parse into a YAML object`);
+      assert.ok(parsed.name, `Workflow ${file} must have a name attribute`);
+    }
+  }
+});

@@ -90,7 +90,7 @@ jobs:
   release:
     name: Create or Update GitHub Release
     needs: [prep, build]
-    if: !cancelled() && needs.prep.result == 'success' && needs.build.result == 'success'
+    if: ${{ !cancelled() && needs.prep.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
