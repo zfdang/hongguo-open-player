@@ -1,6 +1,6 @@
 # 应用图标
 
-全新设计采用展开的红果轮廓与播放三角形，搭配珊瑚红渐变和深酒红圆角底座。外缘保留透明留白，不包含文字、电影场记板或原图标元素。
+采用 A 方案「开放圆环」：珊瑚红圆环在右下方留出开口，表达开放与共享；中央红色播放三角形表达视频播放。暖白色圆角底座搭配简洁几何轮廓，保留红色品牌线索，在小尺寸下也便于识别。底座外缘为透明留白。
 
 ## 文件
 
@@ -14,4 +14,4 @@
 
 ## 设计提示词
 
-Use case: logo-brand. Asset type: a single finished 1024x1024 desktop application icon master for 红果开源播放器, an independent short-drama video player for macOS and Windows. Create an entirely new identity without using or referencing any existing icon. Design a premium, restrained, instantly legible icon: a bold warm coral-red fruit-inspired sculptural loop, like two rounded folded segments opening around a crisp ivory right-pointing play triangle in the center. A subtle tiny leaf-shaped notch integrated in the top curve suggests a red fruit without a literal fruit illustration. Place the emblem inside a deep burgundy-to-near-black rounded-square app tile with beautiful subtle depth, smooth large corner radii, precise optical centering. The red form is bold and tactile, the white play triangle large and simple enough to read at 16px. Soft controlled lighting from upper left; rich red/coral gradients, no excessive highlights. Clean geometric silhouette, no delicate details, no movie clapperboard, no film reel, no lettering, no letters, no Chinese characters, no numbers, no watermark, no extra decorative objects. Straight-on orthographic icon, no perspective, no display mockup. Composition: tile centered, occupies about 84 percent of square canvas width with even fully transparent margins; exterior rounded corners and margins must be genuinely transparent alpha, not white or checkerboard. One icon only. Ready for production desktop use.
+Use case: logo-brand. Asset type: desktop application icon for 红果开源播放器. A bold coral-red circular ring with a broad opening at lower right surrounds a red right-pointing play triangle. Warm white rounded-square tile, flat geometric design, rounded terminals, generous negative space and optical centering. Preserve the approved open-circle design and its colors and proportions. Keep the tile fully opaque and the exterior margins genuinely transparent. No fruit, leaves, text, watermark, ribbons, sculptural effects or decorative objects. Export a 1024×1024 RGBA master and derive all platform sizes from it.
