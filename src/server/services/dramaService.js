@@ -120,6 +120,10 @@ class DramaService {
       series_title: data.series_title || '',
       cover: data.cover || '',
       total: data.total || data.episodes.length,
+      intro: data.intro || '',
+      tags: Array.isArray(data.tags) ? data.tags : [],
+      episode_label: data.episode_label || '',
+      social_info: data.social_info || null,
       episodes: data.episodes.map(ep => ({
         vid: String(ep.vid),
         vid_index: Number(ep.vid_index),

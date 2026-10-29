@@ -75,6 +75,7 @@ createApp({
     const previewTime = ref(0);
     const previewPercent = ref(0);
     const showPreview = ref(false);
+    const showDramaDetailModal = ref(false);
 
     function setControlsHidden(hidden) {
       isControlsHidden.value = hidden;
@@ -538,6 +539,60 @@ createApp({
       }
     }
 
+    let lastFocusedBeforeDramaModal = null;
+
+    function openDramaDetail() {
+      if (!activeSeries.value) return;
+      if (typeof document !== 'undefined') {
+        lastFocusedBeforeDramaModal = document.activeElement;
+      }
+      showDramaDetailModal.value = true;
+      if (typeof nextTick === 'function') {
+        nextTick(() => {
+          const closeBtn = document?.querySelector?.('.drama-modal .modal-close-btn');
+          closeBtn?.focus?.();
+        });
+      }
+    }
+
+    function closeDramaDetail() {
+      showDramaDetailModal.value = false;
+      if (lastFocusedBeforeDramaModal && typeof lastFocusedBeforeDramaModal.focus === 'function') {
+        try { lastFocusedBeforeDramaModal.focus(); } catch (_) {}
+      }
+      lastFocusedBeforeDramaModal = null;
+    }
+
+    function onDramaModalKeydown(e) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        e.preventDefault();
+        closeDramaDetail();
+        return;
+      }
+      if (e.key === 'Tab' && typeof document?.querySelector === 'function') {
+        const modal = document.querySelector('.drama-modal');
+        if (!modal) return;
+        const focusables = Array.from(modal.querySelectorAll(
+          'button:not([disabled]), [tabindex]:not([tabindex="-1"]), a[href], input:not([disabled])'
+        )).filter(el => el.offsetParent !== null);
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first || !modal.contains(document.activeElement)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last || !modal.contains(document.activeElement)) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    }
+
     function switchToRelatedActor(rel) {
       if (!rel || !rel.actor_id) return;
       openActorDetail({
@@ -583,6 +638,7 @@ createApp({
       resetPlayback();
       setControlsHidden(false);
       clearTimeout(controlsHideTimer);
+      showDramaDetailModal.value = false;
       viewMode.value = 'catalog';
       if (navigator.mediaSession) { navigator.mediaSession.playbackState = 'none'; navigator.mediaSession.metadata = null; }
     }
@@ -603,6 +659,12 @@ createApp({
         if (videoEl.value) videoEl.value.pause();
         resetPlayback();
         catalogScrollTop = window.scrollY || 0;
+        if (!detail.intro && drama?.description) {
+          detail.intro = drama.description;
+        }
+        if ((!detail.tags || detail.tags.length === 0) && Array.isArray(drama?.tags)) {
+          detail.tags = drama.tags;
+        }
         activeSeries.value = detail;
         const watched = detail.saved_progress?.watched_indexes || [detail.saved_progress?.episode_index];
         watchedMap.value.set(detail.series_id, new Set(watched.filter(index => Number.isInteger(index) && index > 0)));
@@ -962,6 +1024,11 @@ createApp({
       if (e.target?.tagName === 'SELECT') return;
 
       if (e.code === 'Escape' || e.key === 'Escape') {
+        if (showDramaDetailModal.value) {
+          e.preventDefault();
+          closeDramaDetail();
+          return;
+        }
         if (activeActor.value) {
           e.preventDefault();
           closeActorDetail();
@@ -1169,7 +1236,11 @@ createApp({
       getRankChangeClass,
       onAvatarError,
       catalogError,
-      onActorModalKeydown
+      onActorModalKeydown,
+      showDramaDetailModal,
+      openDramaDetail,
+      closeDramaDetail,
+      onDramaModalKeydown
     };
   }
 }).mount('#app');

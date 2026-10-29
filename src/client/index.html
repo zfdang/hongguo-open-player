@@ -370,14 +370,44 @@
 
         <!-- 右侧选集与短剧详情侧栏 -->
         <aside v-show="sidebarOpen" id="episode-sidebar" class="theater-sidebar">
-          <div class="sidebar-drama-header">
-            <img :src="activeSeries?.cover" class="sidebar-cover" @error="onImageError"/>
-            <div class="sidebar-meta">
-              <h3 class="sidebar-title">{{ activeSeries?.series_title }}</h3>
-              <p class="sidebar-count">共 {{ activeEpisodes.length }} 集全</p>
-              <button class="sidebar-fav-btn" :class="{ active: isFavorited }" @click="toggleFavCurrent">
-                {{ isFavorited ? '❤️ 已在收藏夹' : '🤍 加入收藏' }}
-              </button>
+          <!-- 短剧信息头部卡片 (点击弹出剧情详细信息) -->
+          <div class="sidebar-drama-header" @click="openDramaDetail" title="点击查看短剧详情与完整剧情介绍" role="button" tabindex="0" @keydown.enter="openDramaDetail">
+            <!-- 右上角收藏小红心按钮 (未点亮🤍 / 点亮❤️) -->
+            <button 
+              class="sidebar-fav-icon-btn" 
+              :class="{ favorited: isFavorited }" 
+              @click.stop="toggleFavCurrent" 
+              :title="isFavorited ? '已收藏此剧 (点击取消)' : '收藏此剧 (点击加入收藏)'"
+              :aria-label="isFavorited ? '已收藏此剧' : '收藏此剧'"
+            >
+              <span class="fav-heart-icon">{{ isFavorited ? '❤️' : '🤍' }}</span>
+            </button>
+
+            <div class="sidebar-drama-top">
+              <img :src="activeSeries?.cover" class="sidebar-cover" @error="onImageError"/>
+              <div class="sidebar-meta">
+                <h3 class="sidebar-title" :title="activeSeries?.series_title">{{ activeSeries?.series_title }}</h3>
+                <div class="sidebar-stats-row">
+                  <span class="sidebar-count">共 {{ activeEpisodes.length || activeSeries?.total }} 集全</span>
+                  <span v-if="activeSeries?.social_info?.hot_text" class="sidebar-hot-badge" title="全网热度">
+                    🔥 {{ activeSeries.social_info.hot_text }}
+                  </span>
+                  <span v-if="activeSeries?.social_info?.rating" class="sidebar-rating-badge" title="观众评分">
+                    ⭐ {{ activeSeries.social_info.rating }}分
+                  </span>
+                </div>
+                <div v-if="activeSeries?.tags && activeSeries.tags.length" class="sidebar-tags-row">
+                  <span v-for="tag in activeSeries.tags.slice(0, 3)" :key="tag" class="sidebar-tag-pill">{{ tag }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 剧情简介简要预览 (2行截断，带详情指示) -->
+            <div v-if="activeSeries?.intro" class="sidebar-intro-preview">
+              <p class="sidebar-intro-text">
+                {{ activeSeries.intro }}
+                <span class="sidebar-intro-more">详情 ↗</span>
+              </p>
             </div>
           </div>
 
@@ -517,6 +547,53 @@
               <span>已加载全部 {{ actorWorks.length }} 部短剧作品</span>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 短剧详细介绍模态框 -->
+    <div v-if="showDramaDetailModal && activeSeries" class="drama-modal-overlay" @click.self="closeDramaDetail" @keydown="onDramaModalKeydown">
+      <div class="drama-modal" role="dialog" aria-modal="true" tabindex="-1" :aria-label="(activeSeries.series_title || '短剧') + '的详细信息'">
+        <div class="drama-modal-header">
+          <div class="drama-detail-main">
+            <img :src="activeSeries.cover" :alt="activeSeries.series_title" class="drama-detail-cover" referrerpolicy="no-referrer" @error="onImageError" />
+            <div class="drama-detail-meta">
+              <div class="drama-detail-title-row">
+                <h2 class="drama-detail-title">{{ activeSeries.series_title }}</h2>
+                <button class="drama-detail-fav-btn" :class="{ favorited: isFavorited }" @click="toggleFavCurrent">
+                  {{ isFavorited ? '❤️ 已在收藏夹' : '🤍 加入收藏' }}
+                </button>
+              </div>
+              <div class="drama-detail-stats">
+                <span class="detail-count-badge">共 {{ activeEpisodes.length || activeSeries.total }} 集全</span>
+                <span v-if="activeSeries.social_info?.hot_text" class="detail-hot-tag">
+                  <span class="fire-icon">🔥</span> {{ activeSeries.social_info.hot_text }}
+                </span>
+                <span v-if="activeSeries.social_info?.rating" class="detail-rating-tag">
+                  ⭐ {{ activeSeries.social_info.rating }} 分
+                </span>
+                <span v-if="activeSeries.social_info?.like_count" class="detail-stat-dim">
+                  👍 {{ activeSeries.social_info.like_count }} 点赞
+                </span>
+              </div>
+              <div v-if="activeSeries.tags && activeSeries.tags.length" class="drama-detail-tags">
+                <span v-for="tag in activeSeries.tags" :key="tag" class="drama-tag-pill">{{ tag }}</span>
+              </div>
+            </div>
+          </div>
+          <button class="modal-close-btn" @click="closeDramaDetail" title="关闭 (Esc)">✕</button>
+        </div>
+        <div class="drama-modal-body">
+          <div class="drama-intro-section">
+            <h4 class="intro-heading">📖 剧情简介</h4>
+            <div class="drama-intro-content">
+              <p v-if="activeSeries.intro">{{ activeSeries.intro }}</p>
+              <p v-else class="intro-empty">暂无该剧剧情简介</p>
+            </div>
+          </div>
+        </div>
+        <div class="drama-modal-footer">
+          <button class="drama-continue-btn" @click="closeDramaDetail">继续播放</button>
         </div>
       </div>
     </div>

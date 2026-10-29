@@ -256,6 +256,17 @@ function parseEpisodeListHtml(html, seriesId) {
     web_available: webAccessibleEpisodes === null ? null : i < webAccessibleEpisodes,
   }));
 
+  const intro = typeof detail.series_intro === 'string' ? detail.series_intro.trim() : '';
+  const tags = Array.isArray(detail.tags) ? detail.tags.map(t => String(t).trim()).filter(Boolean) : [];
+  const episodeLabel = typeof detail.episode_right_text === 'string' ? detail.episode_right_text.trim() : '';
+  const socialInfo = data?.seriesSocialInfo ? {
+    rating: Number(data.seriesSocialInfo.rating) || null,
+    rating_count: data.seriesSocialInfo.rating_count ? String(data.seriesSocialInfo.rating_count) : '',
+    hot_text: data.seriesSocialInfo.hot_score_data?.text || '',
+    like_count: data.seriesSocialInfo.series_like_count ? String(data.seriesSocialInfo.series_like_count) : '',
+    favorite_count: data.seriesSocialInfo.series_favorite_count ? String(data.seriesSocialInfo.series_favorite_count) : ''
+  } : null;
+
   return {
     series_id: String(seriesId),
     series_title: seriesTitle,
@@ -263,6 +274,10 @@ function parseEpisodeListHtml(html, seriesId) {
     total: episodes.length,
     web_accessible_episodes: webAccessibleEpisodes,
     episodes,
+    intro,
+    tags,
+    episode_label: episodeLabel,
+    social_info: socialInfo,
     source: 'web', // 标记来源，便于排查
   };
 }
