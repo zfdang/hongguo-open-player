@@ -21,6 +21,8 @@ on:
 
 concurrency:
   group: build-release
+  # Keep pending tag and manual releases instead of replacing them on new pushes.
+  queue: max
   cancel-in-progress: false
 
 permissions:
