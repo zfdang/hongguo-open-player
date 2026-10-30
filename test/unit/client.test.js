@@ -841,6 +841,62 @@ test('openActorFromDrama closes drama detail modal and opens actor detail', asyn
   assert.equal(state.activeActor.value.name, '王妈');
 });
 
+test('index.html layout includes header hamburger menu button, dropdown menu, and modals', () => {
+  const html = fs.readFileSync(require.resolve('../../src/client/index.html'), 'utf8');
+  assert.ok(html.includes('class="header-menu-container"'), 'Header menu container must exist');
+  assert.ok(html.includes('class="header-menu-btn"'), 'Header hamburger menu button must exist');
+  assert.ok(html.includes('class="header-dropdown-menu"'), 'Dropdown menu must exist');
+  assert.ok(html.includes('openShortcutsModal'), 'Shortcuts item must exist');
+  assert.ok(html.includes('openLogDir'), 'Open log dir item must exist');
+  assert.ok(html.includes('openLogFile'), 'Open log file item must exist');
+  assert.ok(html.includes('openAboutModal'), 'About modal item must exist');
+  assert.ok(html.includes('class="shortcuts-modal"'), 'Shortcuts modal dialog must exist');
+  assert.ok(html.includes('class="about-modal"'), 'About modal dialog must exist');
+});
+
+test('app menu toggles and modals open and close correctly', async () => {
+  let axiosPostUrl = null;
+  const state = client(async () => response([]), {
+    axios: {
+      post: async (url) => {
+        axiosPostUrl = url;
+        return { data: { success: true } };
+      }
+    }
+  });
+
+  // 1. Menu toggle
+  assert.equal(state.showAppMenu.value, false);
+  state.toggleAppMenu();
+  assert.equal(state.showAppMenu.value, true);
+  state.closeAppMenu();
+  assert.equal(state.showAppMenu.value, false);
+
+  // 2. About modal
+  state.openAboutModal();
+  assert.equal(state.showAboutModal.value, true);
+  assert.equal(state.showAppMenu.value, false);
+  state.closeAboutModal();
+  assert.equal(state.showAboutModal.value, false);
+
+  // 3. Shortcuts modal
+  state.openShortcutsModal();
+  assert.equal(state.showShortcutsModal.value, true);
+  assert.equal(state.showAppMenu.value, false);
+  state.closeShortcutsModal();
+  assert.equal(state.showShortcutsModal.value, false);
+
+  // 4. Log actions
+  await state.openLogDir();
+  assert.equal(axiosPostUrl, '/api/system/open-log-dir');
+  assert.equal(state.showAppMenu.value, false);
+
+  await state.openLogFile();
+  assert.equal(axiosPostUrl, '/api/system/open-log-file');
+  assert.equal(state.showAppMenu.value, false);
+});
+
+
 
 
 

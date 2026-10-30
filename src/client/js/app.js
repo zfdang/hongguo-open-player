@@ -76,6 +76,68 @@ createApp({
     const previewPercent = ref(0);
     const showPreview = ref(false);
     const showDramaDetailModal = ref(false);
+    const showAppMenu = ref(false);
+    const showAboutModal = ref(false);
+    const showShortcutsModal = ref(false);
+
+    function toggleAppMenu() {
+      showAppMenu.value = !showAppMenu.value;
+    }
+
+    function closeAppMenu() {
+      showAppMenu.value = false;
+    }
+
+    function openAboutModal() {
+      showAppMenu.value = false;
+      showAboutModal.value = true;
+    }
+
+    function closeAboutModal() {
+      showAboutModal.value = false;
+    }
+
+    function openShortcutsModal() {
+      showAppMenu.value = false;
+      showShortcutsModal.value = true;
+    }
+
+    function closeShortcutsModal() {
+      showShortcutsModal.value = false;
+    }
+
+    async function openLogDir() {
+      showAppMenu.value = false;
+      try {
+        const res = await axios.post('/api/system/open-log-dir');
+        if (res.data?.success) {
+          notify('已打开系统日志目录');
+        } else {
+          notify('未能打开日志目录');
+        }
+      } catch (e) {
+        notify('打开日志目录失败');
+      }
+    }
+
+    async function openLogFile() {
+      showAppMenu.value = false;
+      try {
+        const res = await axios.post('/api/system/open-log-file');
+        if (res.data?.success) {
+          notify('已打开当前运行日志');
+        } else {
+          notify('未能打开运行日志');
+        }
+      } catch (e) {
+        notify('打开运行日志失败');
+      }
+    }
+
+    function openGithubRepo() {
+      showAppMenu.value = false;
+      window.open('https://github.com/zfdang/hongguo-open-player', '_blank');
+    }
 
     function setControlsHidden(hidden) {
       isControlsHidden.value = hidden;
@@ -1037,6 +1099,21 @@ createApp({
       if (e.target?.tagName === 'SELECT') return;
 
       if (e.code === 'Escape' || e.key === 'Escape') {
+        if (showAppMenu.value) {
+          e.preventDefault();
+          closeAppMenu();
+          return;
+        }
+        if (showShortcutsModal.value) {
+          e.preventDefault();
+          closeShortcutsModal();
+          return;
+        }
+        if (showAboutModal.value) {
+          e.preventDefault();
+          closeAboutModal();
+          return;
+        }
         if (showDramaDetailModal.value) {
           e.preventDefault();
           closeDramaDetail();
@@ -1109,6 +1186,9 @@ createApp({
     }
 
     function handleGlobalClick(e) {
+      if (showAppMenu.value && !e.target?.closest?.('.header-menu-container')) {
+        showAppMenu.value = false;
+      }
       if (viewMode.value !== 'theater') return;
       if (isTextEditingTarget(e.target)) return;
       const btn = e.target?.closest?.('button');
@@ -1254,7 +1334,19 @@ createApp({
       openDramaDetail,
       closeDramaDetail,
       openActorFromDrama,
-      onDramaModalKeydown
+      onDramaModalKeydown,
+      showAppMenu,
+      showAboutModal,
+      showShortcutsModal,
+      toggleAppMenu,
+      closeAppMenu,
+      openAboutModal,
+      closeAboutModal,
+      openShortcutsModal,
+      closeShortcutsModal,
+      openLogDir,
+      openLogFile,
+      openGithubRepo
     };
   }
 }).mount('#app');

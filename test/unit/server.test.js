@@ -117,6 +117,33 @@ test('servers on different ports isolate cookies via port-specific cookie names'
   assert.equal(res1.status, 200);
 });
 
+test('system log diagnostics endpoints return 200 and open paths', async t => {
+  const { server, port } = await startServer(0);
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${port}`;
+  const home = await fetch(base);
+  const Cookie = home.headers.get('set-cookie').split(';')[0];
+  const apiFetch = (url, opts = {}) => fetch(url, { ...opts, headers: { Cookie, ...opts.headers } });
+
+  const getLogsRes = await apiFetch(`${base}/api/system/logs`);
+  assert.equal(getLogsRes.status, 200);
+  const logsData = await getLogsRes.json();
+  assert.ok(logsData.logFile);
+  assert.ok(logsData.logDir);
+
+  const openDirRes = await apiFetch(`${base}/api/system/open-log-dir`, { method: 'POST' });
+  assert.equal(openDirRes.status, 200);
+  const openDirData = await openDirRes.json();
+  assert.equal(openDirData.success, true);
+  assert.ok(openDirData.logDir);
+
+  const openFileRes = await apiFetch(`${base}/api/system/open-log-file`, { method: 'POST' });
+  assert.equal(openFileRes.status, 200);
+  const openFileData = await openFileRes.json();
+  assert.equal(openFileData.success, true);
+  assert.ok(openFileData.logFile);
+});
+
 test('all GitHub Actions workflow files are valid YAML', async () => {
   const fs = require('node:fs');
   const path = require('node:path');

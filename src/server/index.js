@@ -260,6 +260,72 @@ app.get('/api/system/logs', (req, res) => {
   });
 });
 
+app.post('/api/system/open-log-dir', async (req, res) => {
+  try {
+    const fs = require('node:fs');
+    const logDir = logger.getLogDir();
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+    let opened = false;
+    try {
+      const electron = require('electron');
+      if (electron?.shell?.openPath) {
+        await electron.shell.openPath(logDir);
+        opened = true;
+      }
+    } catch (_) {}
+    if (!opened) {
+      const { exec } = require('node:child_process');
+      const cmd = process.platform === 'win32'
+        ? `explorer "${logDir}"`
+        : process.platform === 'darwin'
+        ? `open "${logDir}"`
+        : `xdg-open "${logDir}"`;
+      exec(cmd, () => {});
+    }
+    res.json({ success: true, logDir });
+  } catch (err) {
+    logger.error('System', `打开日志目录失败: ${err.message}`);
+    res.status(500).json({ error: '无法打开日志目录' });
+  }
+});
+
+app.post('/api/system/open-log-file', async (req, res) => {
+  try {
+    const fs = require('node:fs');
+    const logFile = logger.getLogFilePath();
+    const logDir = logger.getLogDir();
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+    if (!fs.existsSync(logFile)) {
+      fs.writeFileSync(logFile, '', 'utf8');
+    }
+    let opened = false;
+    try {
+      const electron = require('electron');
+      if (electron?.shell?.openPath) {
+        await electron.shell.openPath(logFile);
+        opened = true;
+      }
+    } catch (_) {}
+    if (!opened) {
+      const { exec } = require('node:child_process');
+      const cmd = process.platform === 'win32'
+        ? `notepad "${logFile}"`
+        : process.platform === 'darwin'
+        ? `open "${logFile}"`
+        : `xdg-open "${logFile}"`;
+      exec(cmd, () => {});
+    }
+    res.json({ success: true, logFile });
+  } catch (err) {
+    logger.error('System', `打开日志文件失败: ${err.message}`);
+    res.status(500).json({ error: '无法打开日志文件' });
+  }
+});
+
 app.use('/api', (req, res) => res.status(404).json({ error: '接口不存在' }));
 
 app.use((error, req, res, next) => {
