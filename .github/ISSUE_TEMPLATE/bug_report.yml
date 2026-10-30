@@ -1,0 +1,40 @@
+name: 问题反馈
+description: 反馈使用红果开源播放器时遇到的问题。
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 请描述遇到的问题、复现步骤，以及预期和实际发生的情况。
+      placeholder: |
+        问题描述：
+        复现步骤：
+        预期结果：
+        实际结果：
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: 平台和系统版本
+      description: 请填写运行软件的平台和系统版本。
+      placeholder: 例如 Windows 10、Windows 11 或 macOS 15.0
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 软件版本
+      description: 请填写当前使用的红果开源播放器版本。
+      placeholder: 例如 1.0.21
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: 请在“帮助” → “查看当前运行日志”中获取日志，并将相关内容粘贴到下方。
+      placeholder: 请粘贴发生问题时的运行日志。
+      render: text
+    validations:
+      required: true
