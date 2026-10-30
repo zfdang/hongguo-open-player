@@ -6,6 +6,9 @@ const { spawnSync } = require('node:child_process');
 const files = fs.readdirSync(path.join(__dirname, 'unit'))
   .filter(name => name.endsWith('.test.js')).sort()
   .map(name => path.join(__dirname, 'unit', name));
-const result = spawnSync(process.execPath, ['--test', ...files], { stdio: 'inherit' });
+const result = spawnSync(process.execPath, ['--test', ...files], {
+  stdio: 'inherit',
+  env: { ...process.env, NODE_ENV: 'test' }
+});
 if (result.error) console.error(result.error.message);
 process.exitCode = result.status ?? 1;

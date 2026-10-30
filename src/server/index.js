@@ -260,6 +260,43 @@ app.get('/api/system/logs', (req, res) => {
   });
 });
 
+function openSystemPath(targetPath, isDirectory = false) {
+  if (process.env.NODE_ENV === 'test' || Boolean(process.env.CI)) {
+    return;
+  }
+  try {
+    const electron = require('electron');
+    if (electron?.shell?.openPath) {
+      electron.shell.openPath(targetPath);
+      return;
+    }
+  } catch (_) {}
+
+  try {
+    const { spawn } = require('node:child_process');
+    let child;
+    if (process.platform === 'win32') {
+      if (isDirectory) {
+        child = spawn('explorer', [targetPath], { detached: true, stdio: 'ignore' });
+      } else {
+        child = spawn('cmd', ['/c', 'start', '""', targetPath], {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true,
+          shell: false
+        });
+      }
+    } else if (process.platform === 'darwin') {
+      child = spawn('open', [targetPath], { detached: true, stdio: 'ignore' });
+    } else {
+      child = spawn('xdg-open', [targetPath], { detached: true, stdio: 'ignore' });
+    }
+    if (child && typeof child.unref === 'function') {
+      child.unref();
+    }
+  } catch (_) {}
+}
+
 app.post('/api/system/open-log-dir', async (req, res) => {
   try {
     const fs = require('node:fs');
@@ -267,23 +304,7 @@ app.post('/api/system/open-log-dir', async (req, res) => {
     if (!fs.existsSync(logDir)) {
       fs.mkdirSync(logDir, { recursive: true });
     }
-    let opened = false;
-    try {
-      const electron = require('electron');
-      if (electron?.shell?.openPath) {
-        await electron.shell.openPath(logDir);
-        opened = true;
-      }
-    } catch (_) {}
-    if (!opened) {
-      const { exec } = require('node:child_process');
-      const cmd = process.platform === 'win32'
-        ? `explorer "${logDir}"`
-        : process.platform === 'darwin'
-        ? `open "${logDir}"`
-        : `xdg-open "${logDir}"`;
-      exec(cmd, () => {});
-    }
+    openSystemPath(logDir, true);
     res.json({ success: true, logDir });
   } catch (err) {
     logger.error('System', `打开日志目录失败: ${err.message}`);
@@ -302,23 +323,7 @@ app.post('/api/system/open-log-file', async (req, res) => {
     if (!fs.existsSync(logFile)) {
       fs.writeFileSync(logFile, '', 'utf8');
     }
-    let opened = false;
-    try {
-      const electron = require('electron');
-      if (electron?.shell?.openPath) {
-        await electron.shell.openPath(logFile);
-        opened = true;
-      }
-    } catch (_) {}
-    if (!opened) {
-      const { exec } = require('node:child_process');
-      const cmd = process.platform === 'win32'
-        ? `notepad "${logFile}"`
-        : process.platform === 'darwin'
-        ? `open "${logFile}"`
-        : `xdg-open "${logFile}"`;
-      exec(cmd, () => {});
-    }
+    openSystemPath(logFile, false);
     res.json({ success: true, logFile });
   } catch (err) {
     logger.error('System', `打开日志文件失败: ${err.message}`);
