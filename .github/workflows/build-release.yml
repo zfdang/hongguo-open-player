@@ -2,9 +2,26 @@ name: Build & Release Native Apps
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      force_bump:
+        description: '版本升级方式 (auto: 自动遵循语义化/无变化则末位+1; patch / minor / major: 强制指定)'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+
+concurrency:
+  group: build-release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -14,30 +31,32 @@ jobs:
     name: Prepare Release Version
     runs-on: ubuntu-24.04
     outputs:
+      should_release: ${{ steps.version.outputs.should_release }}
       tag: ${{ steps.version.outputs.tag }}
       raw_version: ${{ steps.version.outputs.raw_version }}
+      bump_type: ${{ steps.version.outputs.bump_type }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
+      - name: Setup Node.js (22.x)
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+
       - name: Compute version
         id: version
-        shell: bash
+        env:
+          INPUT_FORCE_BUMP: ${{ inputs.force_bump || 'auto' }}
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            RAW_VER="${GITHUB_REF#refs/tags/v}"
-          else
-            RAW_VER="1.0.${{ github.run_number }}"
-          fi
-          echo "tag=v${RAW_VER}" >> $GITHUB_OUTPUT
-          echo "raw_version=${RAW_VER}" >> $GITHUB_OUTPUT
-          echo "Computed release version: ${RAW_VER} (tag: v${RAW_VER})"
+          node scripts/compute-release-version.js
 
   build:
     name: Build Native Apps (${{ matrix.platform }})
     needs: prep
+    if: ${{ needs.prep.outputs.should_release == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -90,7 +109,7 @@ jobs:
   release:
     name: Create or Update GitHub Release
     needs: [prep, build]
-    if: ${{ !cancelled() && needs.prep.result == 'success' && needs.build.result == 'success' }}
+    if: ${{ !cancelled() && needs.prep.result == 'success' && needs.prep.outputs.should_release == 'true' && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
@@ -114,6 +133,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prep.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: "红果开源播放器 多平台原生桌面版 ${{ needs.prep.outputs.tag }}"
           draft: false
           prerelease: false
