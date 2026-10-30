@@ -1,5 +1,9 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync, spawnSync } = require('node:child_process');
 const {
   parseSemVer,
   formatSemVer,
@@ -77,6 +81,81 @@ test('manual releases reject existing tags instead of rebuilding an old release'
       commits: [],
     }), /Manual releases must run from main/);
   }
+});
+
+test('stable releases reject feature branches and unsupported events', () => {
+  for (const eventName of ['push', 'workflow_dispatch']) {
+    assert.throws(() => resolveReleaseVersion({
+      ref: 'refs/heads/feature/experiment',
+      eventName,
+      commits: ['feat: unmerged experiment'],
+    }), /Stable releases must run from main/);
+  }
+  assert.throws(() => resolveReleaseVersion({
+    ref: 'refs/heads/main', eventName: 'pull_request',
+  }), /Stable releases must run from main/);
+});
+
+function createReleaseRepository(t) {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'release-source-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', [
+    '-c', 'user.name=Release Test', '-c', 'user.email=release-test@example.invalid', ...args,
+  ], { cwd, stdio: 'pipe' });
+  git('init');
+  git('commit', '--allow-empty', '-m', 'chore: initial commit');
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  git('checkout', '--detach');
+  return { cwd, git };
+}
+
+function runTagRelease(cwd) {
+  const outputFile = path.join(cwd, 'release-output');
+  const result = spawnSync(process.execPath, [
+    path.resolve(__dirname, '../../scripts/compute-release-version.js'),
+  ], {
+    cwd, encoding: 'utf8',
+    env: {
+      ...process.env,
+      GITHUB_REF: 'refs/tags/v1.2.3',
+      GITHUB_EVENT_NAME: 'push',
+      INPUT_FORCE_BUMP: 'auto',
+      GITHUB_OUTPUT: outputFile,
+    },
+  });
+  return { ...result, output: fs.existsSync(outputFile) ? fs.readFileSync(outputFile, 'utf8') : '' };
+}
+
+test('tag release accepts a detached commit already merged into main', t => {
+  const { cwd, git } = createReleaseRepository(t);
+  git('tag', 'v1.2.3');
+  // A tag may refer to an older main commit, not just its current tip.
+  git('commit', '--allow-empty', '-m', 'fix: later main change');
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  git('checkout', '--detach', 'v1.2.3');
+  const result = runTagRelease(cwd);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.output, /should_release=true\n/);
+  assert.match(result.output, /tag=v1\.2\.3\n/);
+});
+
+test('tag release rejects an unmerged commit before producing release outputs', t => {
+  const { cwd, git } = createReleaseRepository(t);
+  git('commit', '--allow-empty', '-m', 'feat: unmerged experiment');
+  git('tag', 'v1.2.3');
+  const result = runTagRelease(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Release tag commit must be reachable from origin\/main/);
+  assert.equal(result.output, '');
+});
+
+test('tag release fails closed when the main tracking ref is missing', t => {
+  const { cwd, git } = createReleaseRepository(t);
+  git('update-ref', '-d', 'refs/remotes/origin/main');
+  const result = runTagRelease(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Ensure main is fetched/);
+  assert.equal(result.output, '');
 });
 
 test('resolveReleaseVersion on push to main with commits calculates semver', () => {

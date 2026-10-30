@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       force_bump:
-        description: '版本升级方式 (auto: 自动遵循语义化/无变化则末位+1; patch / minor / major: 强制指定)'
+        description: '仅限 main 分支。版本升级方式 (auto: 自动语义化/无变化则末位+1; patch / minor / major: 强制指定)'
         required: false
         default: 'auto'
         type: choice

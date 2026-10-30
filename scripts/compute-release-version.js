@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: GPL-3.0-only
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 
 function parseSemVer(tagStr) {
@@ -122,6 +122,25 @@ function checkRemoteTagExists(tag, cwd = process.cwd()) {
   }
 }
 
+function validateReleaseRef(ref, eventName) {
+  if (eventName === 'workflow_dispatch' && ref.startsWith('refs/tags/')) {
+    throw new Error('Manual releases must run from main, not an existing tag. Select main to publish a new version.');
+  }
+  if (['push', 'workflow_dispatch'].includes(eventName) && ref === 'refs/heads/main') return;
+  if (eventName === 'push' && ref.startsWith('refs/tags/v')) return;
+  throw new Error('Stable releases must run from main or a version tag pushed from main.');
+}
+
+function assertTagOnMain(cwd) {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', 'HEAD', 'refs/remotes/origin/main'], {
+      cwd, stdio: 'ignore',
+    });
+  } catch (_) {
+    throw new Error('Release tag commit must be reachable from origin/main. Ensure main is fetched and the commit is merged.');
+  }
+}
+
 function resolveReleaseVersion({
   ref = process.env.GITHUB_REF || '',
   eventName = process.env.GITHUB_EVENT_NAME || 'push',
@@ -130,9 +149,7 @@ function resolveReleaseVersion({
   commits = [],
   isTagExisting = null,
 } = {}) {
-  if (eventName === 'workflow_dispatch' && ref.startsWith('refs/tags/')) {
-    throw new Error('Manual releases must run from main, not an existing tag. Select main to publish a new version.');
-  }
+  validateReleaseRef(ref, eventName);
 
   // 1. Explicit tag push (e.g. refs/tags/v1.2.3)
   if (eventName === 'push' && ref.startsWith('refs/tags/v')) {
@@ -204,6 +221,10 @@ function main() {
   const ref = process.env.GITHUB_REF || '';
   const eventName = process.env.GITHUB_EVENT_NAME || 'push';
   const forceBump = process.env.INPUT_FORCE_BUMP || 'auto';
+
+  // Fail before computing a version or starting any builds for an invalid source.
+  validateReleaseRef(ref, eventName);
+  if (ref.startsWith('refs/tags/')) assertTagOnMain(cwd);
 
   const previousTag = getPreviousTag(cwd);
   const commits = getCommitsSince(previousTag, cwd);
