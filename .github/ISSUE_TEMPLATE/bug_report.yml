@@ -33,7 +33,12 @@ body:
     id: logs
     attributes:
       label: 日志
-      description: 请在“帮助” → “查看当前运行日志”中获取日志，并将相关内容粘贴到下方。
+      description: |
+        请在“帮助” → “查看当前运行日志”中获取日志，并将相关内容粘贴到下方。
+
+        **Windows 用户：**先激活播放器窗口，单按一下 `Alt` 键显示顶部菜单栏，再点击“帮助” → “查看当前运行日志”。再次按 `Alt` 或点击播放画面可收起菜单栏。
+
+        也可以通过“帮助” → “打开日志目录 (Troubleshooting)”打开日志文件夹，找到本次运行的日志。
       placeholder: 请粘贴发生问题时的运行日志。
       render: text
     validations:
