@@ -260,41 +260,47 @@ app.get('/api/system/logs', (req, res) => {
   });
 });
 
-function openSystemPath(targetPath, isDirectory = false) {
+async function openSystemPath(targetPath, isDirectory = false) {
   if (process.env.NODE_ENV === 'test' || Boolean(process.env.CI)) {
-    return;
+    return true;
   }
+  let opened = false;
   try {
     const electron = require('electron');
     if (electron?.shell?.openPath) {
-      electron.shell.openPath(targetPath);
-      return;
+      const errMsg = await electron.shell.openPath(targetPath);
+      if (!errMsg) {
+        opened = true;
+      } else {
+        logger.warn('System', `electron.shell.openPath 失败: ${errMsg}，尝试系统命令回退`);
+      }
     }
   } catch (_) {}
 
-  try {
-    const { spawn } = require('node:child_process');
-    let child;
-    if (process.platform === 'win32') {
-      if (isDirectory) {
-        child = spawn('explorer', [targetPath], { detached: true, stdio: 'ignore' });
+  if (!opened) {
+    try {
+      const { spawn } = require('node:child_process');
+      let child;
+      if (process.platform === 'win32') {
+        if (isDirectory) {
+          child = spawn('explorer', [targetPath], { detached: true, stdio: 'ignore' });
+        } else {
+          child = spawn('notepad', [targetPath], { detached: true, stdio: 'ignore' });
+        }
+      } else if (process.platform === 'darwin') {
+        child = spawn('open', [targetPath], { detached: true, stdio: 'ignore' });
       } else {
-        child = spawn('cmd', ['/c', 'start', '""', targetPath], {
-          detached: true,
-          stdio: 'ignore',
-          windowsHide: true,
-          shell: false
-        });
+        child = spawn('xdg-open', [targetPath], { detached: true, stdio: 'ignore' });
       }
-    } else if (process.platform === 'darwin') {
-      child = spawn('open', [targetPath], { detached: true, stdio: 'ignore' });
-    } else {
-      child = spawn('xdg-open', [targetPath], { detached: true, stdio: 'ignore' });
+      if (child && typeof child.unref === 'function') {
+        child.unref();
+      }
+      opened = true;
+    } catch (err) {
+      logger.error('System', `调用系统命令打开路径失败: ${err.message}`);
     }
-    if (child && typeof child.unref === 'function') {
-      child.unref();
-    }
-  } catch (_) {}
+  }
+  return opened;
 }
 
 app.post('/api/system/open-log-dir', async (req, res) => {
@@ -304,7 +310,7 @@ app.post('/api/system/open-log-dir', async (req, res) => {
     if (!fs.existsSync(logDir)) {
       fs.mkdirSync(logDir, { recursive: true });
     }
-    openSystemPath(logDir, true);
+    await openSystemPath(logDir, true);
     res.json({ success: true, logDir });
   } catch (err) {
     logger.error('System', `打开日志目录失败: ${err.message}`);
@@ -323,7 +329,7 @@ app.post('/api/system/open-log-file', async (req, res) => {
     if (!fs.existsSync(logFile)) {
       fs.writeFileSync(logFile, '', 'utf8');
     }
-    openSystemPath(logFile, false);
+    await openSystemPath(logFile, false);
     res.json({ success: true, logFile });
   } catch (err) {
     logger.error('System', `打开日志文件失败: ${err.message}`);

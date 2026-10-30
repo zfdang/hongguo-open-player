@@ -109,11 +109,12 @@ createApp({
     async function openLogDir() {
       showAppMenu.value = false;
       try {
-        const res = await axios.post('/api/system/open-log-dir');
-        if (res.data?.success) {
+        const response = await fetch('/api/system/open-log-dir', { method: 'POST' });
+        const res = await response.json();
+        if (res?.success) {
           notify('已打开系统日志目录');
         } else {
-          notify('未能打开日志目录');
+          notify(res?.error || '未能打开日志目录');
         }
       } catch (e) {
         notify('打开日志目录失败');
@@ -123,11 +124,12 @@ createApp({
     async function openLogFile() {
       showAppMenu.value = false;
       try {
-        const res = await axios.post('/api/system/open-log-file');
-        if (res.data?.success) {
+        const response = await fetch('/api/system/open-log-file', { method: 'POST' });
+        const res = await response.json();
+        if (res?.success) {
           notify('已打开当前运行日志');
         } else {
-          notify('未能打开运行日志');
+          notify(res?.error || '未能打开运行日志');
         }
       } catch (e) {
         notify('打开运行日志失败');

@@ -855,14 +855,13 @@ test('index.html layout includes header hamburger menu button, dropdown menu, an
 });
 
 test('app menu toggles and modals open and close correctly', async () => {
-  let axiosPostUrl = null;
-  const state = client(async () => response([]), {
-    axios: {
-      post: async (url) => {
-        axiosPostUrl = url;
-        return { data: { success: true } };
-      }
+  let fetchPostUrl = null;
+  const state = client(async (url, opts) => {
+    if (opts?.method === 'POST') {
+      fetchPostUrl = url;
+      return response({ success: true });
     }
+    return response([]);
   });
 
   // 1. Menu toggle
@@ -888,11 +887,11 @@ test('app menu toggles and modals open and close correctly', async () => {
 
   // 4. Log actions
   await state.openLogDir();
-  assert.equal(axiosPostUrl, '/api/system/open-log-dir');
+  assert.equal(fetchPostUrl, '/api/system/open-log-dir');
   assert.equal(state.showAppMenu.value, false);
 
   await state.openLogFile();
-  assert.equal(axiosPostUrl, '/api/system/open-log-file');
+  assert.equal(fetchPostUrl, '/api/system/open-log-file');
   assert.equal(state.showAppMenu.value, false);
 });
 
