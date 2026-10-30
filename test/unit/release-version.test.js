@@ -67,6 +67,18 @@ test('resolveReleaseVersion handles explicit tag push', () => {
   assert.equal(res.bumpType, 'explicit_tag');
 });
 
+test('manual releases reject existing tags instead of rebuilding an old release', () => {
+  for (const forceBump of ['auto', 'patch', 'minor', 'major']) {
+    assert.throws(() => resolveReleaseVersion({
+      ref: 'refs/tags/v1.2.2',
+      eventName: 'workflow_dispatch',
+      forceBump,
+      previousTag: 'v1.2.2',
+      commits: [],
+    }), /Manual releases must run from main/);
+  }
+});
+
 test('resolveReleaseVersion on push to main with commits calculates semver', () => {
   // Minor bump on feat
   const resFeat = resolveReleaseVersion({

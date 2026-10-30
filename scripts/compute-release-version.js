@@ -130,8 +130,12 @@ function resolveReleaseVersion({
   commits = [],
   isTagExisting = null,
 } = {}) {
+  if (eventName === 'workflow_dispatch' && ref.startsWith('refs/tags/')) {
+    throw new Error('Manual releases must run from main, not an existing tag. Select main to publish a new version.');
+  }
+
   // 1. Explicit tag push (e.g. refs/tags/v1.2.3)
-  if (ref.startsWith('refs/tags/v')) {
+  if (eventName === 'push' && ref.startsWith('refs/tags/v')) {
     const raw = ref.replace(/^refs\/tags\/v/, '');
     const parsed = parseSemVer(raw);
     if (!parsed) throw new Error(`Invalid semver tag pushed: ${ref}`);
