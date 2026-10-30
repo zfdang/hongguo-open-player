@@ -950,8 +950,10 @@ createApp({
       const code = videoEl.value?.error?.code;
       const message = videoEl.value?.error?.message || '';
       reportClientLog('ERROR', `播放器解码/渲染报错: code=${code}, message=${message}`);
-      videoErrorMessage.value = code === 3 || code === 4
-        ? '视频格式无法解码；请重试或选择其他分集，并检查系统解码器'
+      videoErrorMessage.value = code === 3
+        ? '视频解码失败；请重试或更换分集，Windows 用户请确认已安装 HEVC 视频扩展'
+        : code === 4
+        ? '视频源加载或格式异常；请检查网络/代理设置，或重试切换分集'
         : '视频加载失败，请检查网络后重试';
     }
 

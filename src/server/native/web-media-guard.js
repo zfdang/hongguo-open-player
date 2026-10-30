@@ -47,6 +47,38 @@ function isPublicMediaUrl(value) {
   } catch (_) { return false; }
 }
 
+function isTrustedMediaDomain(hostname) {
+  if (typeof hostname !== 'string') return false;
+  const host = hostname.toLowerCase();
+  return /(^|\.)(hongguoduanju\.com|fqnovel\.com|fqnovelpic\.com|qznovelvod\.com|fqnovelvod\.com|douyinvod\.com|bytecdn\.cn|byteimg\.com|snssdk\.com|pstatp\.com|volces\.com|ibytedtos\.com|bytedance\.com|novelquickapp\.com)$/i.test(host);
+}
+
+function isLoopbackOrUnspecified(address) {
+  if (typeof address !== 'string') return true;
+  return address === '127.0.0.1' || address === '::1' || address === '0.0.0.0' || address === '::' || address === 'localhost';
+}
+
+function isFakeIpAddress(address) {
+  if (typeof address !== 'string') return false;
+  // RFC 2544 benchmark / standard Fake-IP (198.18.0.0/15) used by Clash, Surge, Sing-box, etc.
+  return /^198\.(18|19)\./.test(address);
+}
+
+function isPermittedAddress(item, hostname) {
+  if (!item || !item.address) return false;
+  // 1. Valid public IP address
+  if (isPublicAddress(item.address)) return true;
+  // 2. Standard Fake-IP address (Clash/Surge/Sing-box TUN mode)
+  if (item.family === 4 && isFakeIpAddress(item.address)) return true;
+  // 3. Known official ByteDance / Hongguo short drama media domains resolving via
+  // transparent proxy or custom Fake-IP pool (e.g. 10.254.x.x / 172.19.x.x), as long
+  // as it does not resolve to loopback/unspecified addresses.
+  if (isTrustedMediaDomain(hostname) && !isLoopbackOrUnspecified(item.address)) {
+    return true;
+  }
+  return false;
+}
+
 function blockedAddress() {
   return Object.assign(new Error('官网片源及其跳转、解析结果必须指向公网'), { code: 'ERR_WEB_MEDIA_ADDRESS', mediaRetryable: true });
 }
@@ -125,18 +157,30 @@ function webMediaRequestOptions(value, { trustedOfficialDns = false } = {}) {
       dns.lookup(hostname, { ...settings, all: true }, (error, addresses) => {
         if (error) return callback(error);
         const target = hosts.get(hostname.toLowerCase());
-        // Validate actual socket resolution; a separate preflight permits rebinding.
-        if (target && (!addresses.length || addresses.some(item => !isPublicAddress(item.address)))) {
-          const official = target.origin === 'https://hongguoduanju.com';
-          const fakeOnly = addresses.length && addresses.every(item => isPublicAddress(item.address) ||
-            item.family === 4 && /^198\.(18|19)\./.test(item.address));
-          if (official && fakeOnly && settings.family !== 6) {
-            resolveOfficialAddress().then(finish, callback);
-            return;
-          }
+        if (!target) return finish(addresses);
+        if (!addresses.length) return callback(new Error('片源域名未解析到地址'));
+
+        const official = target.origin === 'https://hongguoduanju.com';
+        const hasFakeIp = addresses.some(item => item.family === 4 && isFakeIpAddress(item.address));
+
+        // For the official website, if resolved to Fake-IP, attempt secure DoH to avoid regional CDN divergence.
+        // If DoH fails (e.g. DNS-over-HTTPS unreachable), fall back safely to the resolved address if permitted.
+        if (official && hasFakeIp && settings.family !== 6) {
+          resolveOfficialAddress().then(finish, () => {
+            if (addresses.every(item => isPermittedAddress(item, hostname))) {
+              finish(addresses);
+            } else {
+              callback(blockedAddress());
+            }
+          });
+          return;
+        }
+
+        // Validate that all resolved addresses are permitted (public IP, fake-IP, or trusted media CDN domain)
+        if (addresses.some(item => !isPermittedAddress(item, hostname))) {
           return callback(blockedAddress());
         }
-        // User-selected proxies may be local; their remote DNS remains a trust boundary.
+
         finish(addresses);
       });
     },
@@ -150,4 +194,11 @@ function webMediaRequestOptions(value, { trustedOfficialDns = false } = {}) {
 
 function warmOfficialDns() { return resolveOfficialAddress().catch(() => {}); }
 
-module.exports = { isPublicMediaUrl, webMediaRequestOptions, warmOfficialDns };
+module.exports = {
+  isPublicMediaUrl,
+  webMediaRequestOptions,
+  warmOfficialDns,
+  isTrustedMediaDomain,
+  isFakeIpAddress,
+  isPermittedAddress
+};
