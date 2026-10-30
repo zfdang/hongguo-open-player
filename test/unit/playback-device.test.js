@@ -48,3 +48,19 @@ test('registration never retries explicit business or security rejection', async
     assert.equal(calls, 1);
   }
 });
+
+test('resetting playback device clears cached registration and creates a new identity', async () => {
+  const getDevice = createPlaybackDeviceRegistrar();
+  const cdidList = [];
+  const request = async (url, options) => {
+    return { device_id_str: '999', install_id_str: '888', code: 0 };
+  };
+  const first = await getDevice(request);
+  assert.equal(first.device_id, '999');
+  const second = await getDevice(request);
+  assert.equal(first, second);
+
+  getDevice.reset();
+  const third = await getDevice(request);
+  assert.notEqual(first.cdid, third.cdid);
+});

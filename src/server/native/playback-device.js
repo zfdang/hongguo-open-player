@@ -72,7 +72,7 @@ function retryable(error) {
 function createPlaybackDeviceRegistrar() {
     let registration;
     let request;
-    return function getPlaybackDevice(requestJson) {
+    const registrar = function getPlaybackDevice(requestJson) {
         // Concurrent playback/search requests share registration. Retries reuse the
         // same encrypted payload and identity, including after an exhausted attempt.
         registration ||= Promise.resolve().then(async () => {
@@ -108,6 +108,11 @@ function createPlaybackDeviceRegistrar() {
         });
         return registration;
     };
+    registrar.reset = function resetPlaybackDevice() {
+        registration = undefined;
+        request = undefined;
+    };
+    return registrar;
 }
 
 const getPlaybackDevice = createPlaybackDeviceRegistrar();
