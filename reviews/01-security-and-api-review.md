@@ -264,7 +264,7 @@ if (String(seriesId).startsWith('custom:')) return require('./custom-source').fe
 if (String(seriesId).startsWith('hema:')) return require('./hema').fetchEpisodeList(seriesId);
 if (String(seriesId).startsWith('xifan:')) return require('./xifan').fetchEpisodeList(seriesId);
 ```
-经比对仓库文件树，当前项目中并不存在 `custom-source.js`、`hema.js`、`xifan.js` 等模块。当用户请求不合法的 ID 时，虽然上层逻辑有捕获保护，但这属于上游开源逆向组件（如 TV 聚合版代码）移植时残留的无用死代码。
+经比对仓库文件树，当前项目中并不存在 `custom-source.js`、`hema.js`、`xifan.js` 等模块。当用户请求不合法的 ID 时，虽然上层逻辑有捕获保护，但这属于上游开源项目（如 TV 聚合版代码）移植时残留的无用死代码。
 
 #### 2. 修复方案
 清理掉未被引入的第三方模块引用分支，保持代码库整洁，降低攻击面与审计混淆。
@@ -325,7 +325,7 @@ if (String(seriesId).startsWith('xifan:')) return require('./xifan').fetchEpisod
 | :--- | :---: | :--- |
 | **设备标识生成方式** | ✅ 极佳 | `playback-device.js` 中 `cdid`, `openudid`, `clientudid`, `req_id` 均使用安全随机生成 (`crypto.randomUUID`, `crypto.randomBytes`)。 |
 | **生命周期管理** | ✅ 极佳 | 设备注册会话完全仅存放在内存 Promise 中 (`registration ||= ...`)，不写磁盘，进程重启即销毁，不产生长期追踪指纹。 |
-| **无真实私钥硬编码** | ✅ 合规 | 逆向提取的算法涉及的常量为字节跳动移动端公开 SDK 的混淆表、SBOX 与固定协议盐（`KDF_SALT`），非任何特定个人的私钥或身份证书。 |
+| **无真实私钥硬编码** | ✅ 合规 | 参考开源实现涉及的常量为公开的混淆表、SBOX 与固定协议盐（`KDF_SALT`），非任何特定个人的私钥或身份证书。 |
 | **国密 SM3 与 CENC 解密**| ✅ 稳健 | `sm3.js` 为纯 JS 实现的标准国密摘要算法；`decryptMp4Buffer` 实现了内存内的标准 ISO-14496-12 CENC AES-CTR 解密与 MP4 Box 重构，无溢出风险。 |
 
 ---
