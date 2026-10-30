@@ -896,6 +896,70 @@ test('app menu toggles and modals open and close correctly', async () => {
   assert.equal(state.showAppMenu.value, false);
 });
 
+test('onVideoError probes stream endpoint on code 4 and displays device registration failure hint', async () => {
+  const probeRequests = [];
+  const state = client(async (url, options) => {
+    if (url.startsWith('/api/stream/')) {
+      probeRequests.push({ url, options });
+      return {
+        ok: false,
+        status: 500,
+        json: async () => ({
+          code: 'DEVICE_REGISTRATION_FAILED',
+          error: '匿名播放设备注册失败（ERR_NETWORK），请稍后重试'
+        })
+      };
+    }
+    return response({ results: [] });
+  });
+
+  state.activeSeries.value = { series_id: '1', series_title: '测试短剧' };
+  state.activeEpisodes.value = [{ vid: 'vid-123', vid_index: 1 }];
+  state.activeEpisodeIndex.value = 1;
+  state.videoEl.value = {
+    error: { code: 4, message: 'MEDIA_ELEMENT_ERROR: Format error' }
+  };
+
+  await state.onVideoError();
+
+  assert.equal(probeRequests.length, 1);
+  assert.match(probeRequests[0].url, /\/api\/stream\/vid-123/);
+  assert.equal(probeRequests[0].options?.headers?.Range, 'bytes=0-0');
+  assert.match(state.videoErrorMessage.value, /播放设备注册受阻（ERR_NETWORK）/);
+  assert.match(state.videoErrorMessage.value, /Clash\/去广告规则/);
+});
+
+test('onVideoError displays custom stream error when probe reports other server error, and handles code 3', async () => {
+  const state = client(async (url) => {
+    if (url.startsWith('/api/stream/')) {
+      return {
+        ok: false,
+        status: 500,
+        json: async () => ({
+          code: 'OTHER_ERROR',
+          error: '自定义片源解析失败'
+        })
+      };
+    }
+    return response({});
+  });
+
+  state.activeSeries.value = { series_id: '1', series_title: '测试短剧' };
+  state.activeEpisodes.value = [{ vid: 'vid-456', vid_index: 1 }];
+  state.activeEpisodeIndex.value = 1;
+  state.videoEl.value = {
+    error: { code: 4, message: 'Format error' }
+  };
+
+  await state.onVideoError();
+  assert.equal(state.videoErrorMessage.value, '自定义片源解析失败；请检查网络或重试切换分集');
+
+  // Code 3 HEVC test
+  state.videoEl.value = { error: { code: 3, message: 'Decode error' } };
+  await state.onVideoError();
+  assert.match(state.videoErrorMessage.value, /HEVC 视频扩展/);
+});
+
 
 
 

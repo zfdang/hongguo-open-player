@@ -1005,18 +1005,45 @@ createApp({
       playNextEpisode();
     }
 
-    function onVideoError(e) {
+    async function onVideoError(e) {
       console.error('[Player] 视频播放器报错:', e);
       isBuffering.value = false;
       if (e?.target && e.target !== videoEl.value) return;
       const code = videoEl.value?.error?.code;
       const message = videoEl.value?.error?.message || '';
       reportClientLog('ERROR', `播放器解码/渲染报错: code=${code}, message=${message}`);
-      videoErrorMessage.value = code === 3
-        ? '视频解码失败；请重试或更换分集，Windows 用户请确认已安装 HEVC 视频扩展'
-        : code === 4
-        ? '视频源加载或格式异常；请检查网络/代理设置，或重试切换分集'
-        : '视频加载失败，请检查网络后重试';
+      if (code === 3) {
+        videoErrorMessage.value = '视频解码失败；请重试或更换分集，Windows 用户请确认已安装 HEVC 视频扩展';
+      } else if (code === 4) {
+        videoErrorMessage.value = '视频源加载或格式异常；请检查网络/代理设置，或重试切换分集';
+        const streamUrl = currentStreamUrl.value;
+        const currentEpIndex = activeEpisodeIndex.value;
+        if (streamUrl) {
+          try {
+            const probeRes = await fetch(streamUrl, {
+              method: 'GET',
+              headers: { Range: 'bytes=0-0' }
+            });
+            if (!probeRes.ok && activeEpisodeIndex.value === currentEpIndex) {
+              const errData = await probeRes.json().catch(() => null);
+              if (errData?.code === 'DEVICE_REGISTRATION_FAILED' || /匿名播放设备注册失败|ERR_NETWORK/i.test(errData?.error || '')) {
+                videoErrorMessage.value = '播放设备注册受阻（ERR_NETWORK）；请检查网络连接、代理软件（Clash/去广告规则）或 DNS 设置';
+                reportClientLog('WARN', '播放器源探测提示: 设备注册受阻（ERR_NETWORK），已展示网络/代理排查指引');
+              } else if (errData?.code === 'SECURITY_BLOCKED') {
+                videoErrorMessage.value = '视频源地址未通过安全检查；请切换分集重试';
+              } else if (errData?.error) {
+                videoErrorMessage.value = `${errData.error}；请检查网络或重试切换分集`;
+              }
+            }
+          } catch (_) {
+            if (activeEpisodeIndex.value === currentEpIndex && typeof navigator !== 'undefined' && navigator.onLine === false) {
+              videoErrorMessage.value = '网络连接已断开，请检查网络设置后重试';
+            }
+          }
+        }
+      } else {
+        videoErrorMessage.value = '视频加载失败，请检查网络后重试';
+      }
     }
 
     function retryCurrentEpisode() {

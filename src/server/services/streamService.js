@@ -399,7 +399,16 @@ class StreamService {
         this.plans.delete(planKey);
         logger.error('StreamService', `流媒体播放异常 vid=${vid}: ${error.message}`);
         if (!res.destroyed) {
-          if (!res.headersSent) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: '视频源加载失败，请稍后重试' })); }
+          if (!res.headersSent) {
+            res.writeHead(500, {
+              'Content-Type': 'application/json',
+              'X-Stream-Error-Code': error.code || 'STREAM_ERROR',
+            });
+            res.end(JSON.stringify({
+              code: error.code || 'STREAM_ERROR',
+              error: error.message || '视频源加载失败，请稍后重试',
+            }));
+          }
           else res.destroy(error);
         }
       } else {
@@ -476,8 +485,14 @@ class StreamService {
       console.error(`[StreamService] 播放流服务异常 vid: ${vid}`, err);
       if (res.destroyed) return;
       if (!res.headersSent) {
-        res.writeHead(err.status || 500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
+        res.writeHead(err.status || 500, {
+          'Content-Type': 'application/json',
+          'X-Stream-Error-Code': err.code || 'STREAM_ERROR',
+        });
+        res.end(JSON.stringify({
+          code: err.code || 'STREAM_ERROR',
+          error: err.message || '视频源加载失败，请稍后重试',
+        }));
       }
     }
   }
