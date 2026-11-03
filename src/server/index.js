@@ -90,6 +90,12 @@ function sendApiError(res, error) {
   res.status(status).json({ error: status === 400 ? error.message : messages[error.code] || '操作失败，请稍后重试' });
 }
 
+// 版本来自打包时写入的 package.json，开发模式同样使用该文件。
+app.get('/api/system/version', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ version: require('../../package.json').version });
+});
+
 // ================= API 路由 =================
 
 /**

@@ -722,7 +722,7 @@
             <img class="about-brand-icon" src="/assets/app-icon.png" alt="" width="44" height="44" />
             <div class="about-brand-titles">
               <h3 class="about-title">红果开源播放器</h3>
-              <span class="about-version">v1.2.0 · 原生桌面客户端</span>
+              <span class="about-version">{{ appVersion ? 'v' + appVersion + ' · ' : '' }}原生桌面客户端</span>
             </div>
           </div>
           <button class="modal-close-btn" @click="closeAboutModal" title="关闭 (Esc)">✕</button>

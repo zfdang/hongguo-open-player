@@ -78,6 +78,7 @@ createApp({
     const showDramaDetailModal = ref(false);
     const showAppMenu = ref(false);
     const showAboutModal = ref(false);
+    const appVersion = ref('');
     const showShortcutsModal = ref(false);
 
     function toggleAppMenu() {
@@ -91,6 +92,10 @@ createApp({
     function openAboutModal() {
       showAppMenu.value = false;
       showAboutModal.value = true;
+      fetch('/api/system/version').then(res => {
+        if (!res.ok) throw new Error('version unavailable');
+        return res.json();
+      }).then(data => { appVersion.value = typeof data.version === 'string' ? data.version : ''; }).catch(() => { appVersion.value = ''; });
     }
 
     function closeAboutModal() {
@@ -1365,7 +1370,7 @@ createApp({
       openActorFromDrama,
       onDramaModalKeydown,
       showAppMenu,
-      showAboutModal,
+      showAboutModal, appVersion,
       showShortcutsModal,
       toggleAppMenu,
       closeAppMenu,
