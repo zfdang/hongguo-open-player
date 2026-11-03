@@ -754,7 +754,7 @@ test('index.html layout places favorite button to the left of sidebar-toggle-btn
   assert.ok(favIndex < toggleIndex, 'Favorite button must be on the left, sidebar toggle on the right');
   
   assert.ok(html.includes('sidebar-toggle-icon'));
-  assert.ok(html.includes("sidebarOpen ? '收起选集' : '展开选集'"));
+  assert.ok(html.includes("sidebarOpen ? '隐藏侧边栏' : '显示侧边栏'"));
 });
 
 test('drama detail modal state opens on openDramaDetail and closes on Escape/closeDramaDetail', () => {

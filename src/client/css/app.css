@@ -693,8 +693,8 @@ html.platform-mac .app-header {
 }
 
 .sidebar-toggle-icon {
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
   display: block;
 }
