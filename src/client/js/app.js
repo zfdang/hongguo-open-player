@@ -141,6 +141,7 @@ createApp({
       if (likes >= 1) return '#a8dcff';
       return '#ffffff';
     }
+    const danmakuDuration = 10;
     const visibleDanmaku = computed(() => {
       const vid = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value)?.vid;
       if (!danmakuEnabled.value || danmakuKey !== `${activeSeries.value?.series_id}:${vid}`) return [];
@@ -150,8 +151,8 @@ createApp({
         if (item.time > now) break;
         const lane = free.findIndex(t => item.time >= t);
         if (lane < 0) continue;
-        free[lane] = item.time + 8;
-        if (now - item.time < 8) result.push({ ...item, color: danmakuColor(item), index, lane, progress: (now - item.time) / 8 });
+        free[lane] = item.time + danmakuDuration;
+        if (now - item.time < danmakuDuration) result.push({ ...item, color: danmakuColor(item), index, lane, progress: (now - item.time) / danmakuDuration });
       }
       return result;
     });
