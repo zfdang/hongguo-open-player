@@ -323,7 +323,7 @@
             ></video>
 
             <div v-if="danmakuEnabled" class="danmaku-layer" :style="{ opacity: danmakuOpacity, height: (danmakuRows * 32) + 'px' }" aria-hidden="true">
-              <span v-for="item in visibleDanmaku" :key="item.index" class="danmaku-item" :style="{ top: (item.lane * 32) + 'px', left: ((1 - item.progress) * 100) + '%', transform: 'translateX(-' + (item.progress * 100) + '%)', color: item.color }">{{ item.text }}<sup v-if="item.likes > 0" class="danmaku-likes">+{{ item.likes }}</sup></span>
+              <span v-for="item in visibleDanmaku" :key="item.index" class="danmaku-item" :style="{ top: (item.lane * 32) + 'px', transform: 'translateX(calc(-' + (item.progress * 100) + 'cqw - ' + (item.progress * 100) + '%))', color: item.color }">{{ item.text }}<sup v-if="item.likes > 0" class="danmaku-likes">+{{ item.likes }}</sup></span>
             </div>
             <!-- 居中缓冲加载环 -->
             <div v-if="isBuffering" class="player-buffering">
