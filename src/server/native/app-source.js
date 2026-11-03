@@ -130,13 +130,27 @@ function helios(khronos) {
 
 function branchOf(url, body, khronos) { const bodyMd5 = body ? crypto.createHash('md5').update(body).digest() : Buffer.alloc(16); const q = sm3(url.split('?')[1]); const iv = getIv(getIv(getIv(0x20230928, q), bodyMd5), le32(khronos)); const low = iv & 15; return low - (((low * 171) >> 9) * 3); }
 function playbackRequest(payload, identity) {
-    // Registered identity alone is sufficient for this endpoint; keep search signing separate.
-    const query = pythonUrlEncode({ ...DEVICE, ...identity, _rticket: String(Date.now()) });
-    return { url: `${VIDEO_API}?${query}`, body: Buffer.from(payload), headers: {
+    const body = Buffer.from(payload);
+    const khronos = Math.floor(Date.now() / 1000);
+    const ticket = Date.now();
+    let query, url;
+    for (let n = 0; n < 128; n += 1) {
+        query = pythonUrlEncode({ ...DEVICE, ...identity, _rticket: String(ticket + n) });
+        url = `${VIDEO_API}?${query}`;
+        if (branchOf(url, body, khronos) === 0) break;
+        if (n === 127) throw new Error('无法生成播放请求签名');
+    }
+    const device = { ...DEVICE, ...identity };
+    return { url, body, headers: {
         'User-Agent': PLAYBACK_UA, Accept: 'application/json; charset=utf-8,application/x-protobuf',
-        'Content-Type': 'application/json; charset=UTF-8',
+        'Content-Type': 'application/json; charset=UTF-8', 'sdk-version': '2', 'x-ss-dp': '8662',
+        'x-khronos': String(khronos), 'x-ss-stub': md5(body),
+        'x-gorgon': xGorgon(query, body, khronos, Math.floor(Math.random() * 65536)),
+        'x-ladon': be32(khronos).toString('base64'), 'x-argus': le32(khronos).toString('base64'),
+        'x-helios': helios(khronos), 'x-medusa': buildMedusa(url, body, khronos, device),
     } };
 }
+
 function parseSearchInteger(value) {
     if (typeof value !== 'number' && (typeof value !== 'string' || !/^\d+$/.test(value.trim()))) return null;
     const number = Number(value);
