@@ -55,6 +55,12 @@ createApp({
     const duration = ref(0);
     const bufferedPercent = ref(0);
     const playbackRate = ref('1.0');
+    const showSpeedMenu = ref(false);
+    function selectSpeed(rate) {
+      playbackRate.value = rate;
+      showSpeedMenu.value = false;
+      changeSpeed();
+    }
     const volume = ref(1.0);
     const isMuted = ref(false);
     const watchedMap = ref(new Map()); // seriesId -> Set(epIndexes)
@@ -1212,6 +1218,7 @@ createApp({
       if (isTextEditingTarget(e.target)) return;
       if (e.target?.tagName === 'SELECT') return;
 
+      if ((e.code === 'Escape' || e.key === 'Escape') && showSpeedMenu.value) { showSpeedMenu.value = false; e.preventDefault(); return; }
       if (e.code === 'Escape' || e.key === 'Escape') {
         if (showAppMenu.value) {
           e.preventDefault();
@@ -1300,6 +1307,7 @@ createApp({
     }
 
     function handleGlobalClick(e) {
+      if (showSpeedMenu.value && !e.target?.closest?.('.speed-selector')) showSpeedMenu.value = false;
       if (showAppMenu.value && !e.target?.closest?.('.header-menu-container')) {
         showAppMenu.value = false;
       }
@@ -1378,7 +1386,7 @@ createApp({
       duration,
       bufferedPercent,
       playedPercent,
-      playbackRate,
+      playbackRate, showSpeedMenu, selectSpeed,
       volume,
       isMuted,
       currentGroup,

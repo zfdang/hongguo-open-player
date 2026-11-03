@@ -2624,3 +2624,12 @@ html.platform-win .app-header { padding-right: 160px; }
 .danmaku-item { will-change: left, transform; }
 
 .danmaku-likes { font-size: 0.58em; line-height: 1; vertical-align: super; margin-left: 3px; font-weight: 600; }
+
+.speed-selector { position: relative; flex: none; }
+.speed-button { min-width: 70px; height: 32px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-card); color: var(--text-main); cursor: pointer; }
+.speed-button span { margin-left: 6px; color: var(--text-dim); }
+.speed-button:hover { border-color: var(--text-sub); }
+.speed-menu { position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%); width: 112px; padding: 5px; border: 1px solid var(--border-color); border-radius: 8px; background: #1b1d27; box-shadow: 0 8px 28px #0009; z-index: 20; }
+.speed-menu button { display: flex; width: 100%; justify-content: space-between; align-items: center; padding: 8px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text-main); cursor: pointer; font-size: 13px; }
+.speed-menu button:hover { background: #ffffff14; }
+.speed-menu button.active { color: var(--accent); background: #ff40551a; }

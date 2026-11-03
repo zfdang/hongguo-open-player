@@ -386,14 +386,11 @@
                   {{ fitMode === 'contain' ? '⤢ 适应' : '⛶ 铺满' }}
                 </button>
                 <!-- 倍速选择 -->
-                <div class="speed-selector">
-                  <select v-model="playbackRate" @change="changeSpeed">
-                    <option value="0.75">0.75x</option>
-                    <option value="1.0">1.0x</option>
-                    <option value="1.25">1.25x</option>
-                    <option value="1.5">1.5x</option>
-                    <option value="2.0">2.0x</option>
-                  </select>
+                <div class="speed-selector" @pointerenter="clearControlsTimer" @pointerleave="resetControlsTimer">
+                  <button class="speed-button" @click="showSpeedMenu = !showSpeedMenu" :aria-expanded="showSpeedMenu" aria-label="播放倍速">{{ playbackRate }}x <span aria-hidden="true">⌃</span></button>
+                  <div v-if="showSpeedMenu" class="speed-menu" aria-label="选择播放倍速">
+                    <button v-for="rate in ['0.75', '1.0', '1.25', '1.5', '2.0']" :key="rate" :class="{ active: playbackRate === rate }" :aria-pressed="playbackRate === rate" @click="selectSpeed(rate)">{{ rate }}x <span v-if="playbackRate === rate" aria-hidden="true">✓</span></button>
+                  </div>
                 </div>
                 <!-- 音量 -->
                 <div class="volume-box">
