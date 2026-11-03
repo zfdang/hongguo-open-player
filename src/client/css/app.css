@@ -598,6 +598,9 @@ html.platform-mac .app-header {
 }
 
 .back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: transparent;
   border: 1px solid var(--border-color);
   color: var(--text-sub);
