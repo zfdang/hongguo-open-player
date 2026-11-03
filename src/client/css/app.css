@@ -923,6 +923,8 @@ html.platform-mac .app-header {
   gap: 12px;
 }
 
+.controls-right { gap: clamp(16px, 2vw, 28px); }
+
 .ctrl-btn {
   background: transparent;
   border: none;
@@ -937,6 +939,8 @@ html.platform-mac .app-header {
   border-radius: 4px;
   transition: all 0.15s;
 }
+
+.fit-btn { width: auto; padding: 0 4px; white-space: nowrap; }
 
 .ctrl-btn:hover:not(:disabled) {
   color: var(--accent);
@@ -2598,3 +2602,25 @@ html.platform-win .app-header { padding-right: 160px; }
   .player-header { padding: 0 8px; gap: 5px; }
 }
 @media (prefers-reduced-motion: reduce) { .skeleton-cover, .skeleton-line { animation: none; } }
+
+.danmaku-layer { position: absolute; inset: 60px 0 auto; height: 96px; overflow: hidden; pointer-events: none; z-index: 2; }
+.danmaku-item { position: absolute; white-space: nowrap; font-size: 20px; line-height: 30px; text-shadow: 1px 1px 3px #000, -1px -1px 3px #000; }
+.danmaku-setting { display: flex; align-items: center; gap: 3px; font-size: 12px; white-space: nowrap; }
+.danmaku-setting input { width: 60px; }
+
+.danmaku-control { position: relative; flex: none; }
+.danmaku-button { background: transparent; border: 1px solid var(--border-color); border-radius: 6px; padding: 5px 9px; color: var(--text-dim); cursor: pointer; white-space: nowrap; }
+.danmaku-button.active { color: var(--accent); border-color: var(--accent); }
+.danmaku-panel { position: absolute; bottom: calc(100% + 14px); right: 0; width: 250px; padding: 16px; border: 1px solid var(--border-color); border-radius: 10px; background: #1b1d27; box-shadow: 0 8px 28px #0009; z-index: 20; color: var(--text-main); }
+.danmaku-panel-header, .danmaku-panel-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.danmaku-panel-header { margin-bottom: 16px; }
+.danmaku-panel-row { margin-top: 12px; font-size: 12px; white-space: nowrap; }
+.danmaku-switch, .danmaku-row-options button { border: 1px solid var(--border-color); border-radius: 5px; padding: 4px 8px; background: #282b36; color: var(--text-dim); cursor: pointer; }
+.danmaku-switch.active, .danmaku-row-options button.active { color: var(--accent); border-color: var(--accent); }
+.danmaku-row-options { display: flex; gap: 4px; }
+.danmaku-panel-row input { flex: 1; min-width: 0; accent-color: var(--accent); }
+.danmaku-status { margin-top: 12px; color: var(--text-dim); font-size: 12px; }
+.danmaku-status button { border: 0; background: none; color: var(--accent); cursor: pointer; }
+.danmaku-item { will-change: left, transform; }
+
+.danmaku-likes { font-size: 0.58em; line-height: 1; vertical-align: super; margin-left: 3px; font-weight: 600; }

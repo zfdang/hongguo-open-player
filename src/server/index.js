@@ -96,6 +96,14 @@ app.get('/api/system/version', (_req, res) => {
   res.json({ version: require('../../package.json').version });
 });
 
+app.get('/api/danmaku/:seriesId/:vid', async (req, res) => {
+  const { seriesId, vid } = req.params;
+  if (!/^\d{6,30}$/.test(seriesId) || !/^\d{6,30}$/.test(vid)) return res.status(400).json({ error: '剧集编号无效' });
+  const result = await require('./native/danmaku').fetchDanmaku({ seriesId, vid, fresh: req.query.fresh === '1' });
+  res.set('Cache-Control', 'no-store');
+  res.json(result);
+});
+
 // ================= API 路由 =================
 
 /**

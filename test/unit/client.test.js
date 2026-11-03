@@ -964,3 +964,34 @@ test('onVideoError displays custom stream error when probe reports other server 
 
 
 
+
+test('enabled danmaku loads for each episode and retains display settings', async () => {
+  const calls = [];
+  const state = client(async url => {
+    calls.push(url);
+    if (url.startsWith('/api/danmaku/')) return response({ success: true, items: [], total: 0 });
+    return response({ series_id: '123456', episodes: [{ vid: '111111', vid_index: 1 }, { vid: '222222', vid_index: 2 }] });
+  });
+  await state.openTheater({ series_id: '123456' });
+  assert.equal(state.danmakuEnabled.value, true);
+  assert.equal(state.danmakuRows.value, 3);
+  state.danmakuRows.value = 5;
+  state.danmakuOpacity.value = 0.4;
+  state.switchEpisode({ vid_index: 2 });
+  assert.ok(calls.some(url => url.startsWith('/api/danmaku/123456/111111')));
+  assert.ok(calls.some(url => url.startsWith('/api/danmaku/123456/222222')));
+  assert.equal(state.danmakuEnabled.value, true);
+  assert.equal(state.danmakuRows.value, 5);
+  assert.equal(state.danmakuOpacity.value, 0.4);
+});
+
+test('danmaku heat colors use fixed like thresholds', async () => {
+  const state = client(async url => url.startsWith('/api/danmaku/')
+    ? response({ success: true, items: [{ time: 0, text: 'a', likes: 10 }, { time: 0, text: 'b', likes: 100 }, { time: 0, text: 'c', likes: 500 }] })
+    : response({ series_id: '123456', episodes: [{ vid: '111111', vid_index: 1 }] }));
+  await state.openTheater({ series_id: '123456' });
+  await new Promise(resolve => setImmediate(resolve));
+  const items = state.visibleDanmaku.value;
+  assert.equal(items.length, 3);
+  assert.equal(new Set(items.map(item => item.color)).size, 3);
+});
