@@ -7,7 +7,7 @@ function client(fetch, overrides = {}) {
   const mounted = [];
   vm.runInNewContext(fs.readFileSync(require.resolve('../../src/client/js/app.js'), 'utf8'), {
     Vue: { ref: value => ({ value }), computed: fn => ({ get value() { return fn(); } }),
-      nextTick: async fn => { if (fn) fn(); }, onMounted(fn) { mounted.push(fn); }, onUnmounted() {},
+      nextTick: async fn => { if (fn) fn(); }, watch() {}, onMounted(fn) { mounted.push(fn); }, onUnmounted() {},
       createApp: options => ({ mount() { state = options.setup(); } }) },
     navigator: { userAgent: '' }, document: { documentElement: { classList: { add() {} } } },
     fetch, console, setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {}, window: { addEventListener() {}, removeEventListener() {} }, ...overrides
@@ -991,7 +991,30 @@ test('danmaku heat colors use fixed like thresholds', async () => {
     : response({ series_id: '123456', episodes: [{ vid: '111111', vid_index: 1 }] }));
   await state.openTheater({ series_id: '123456' });
   await new Promise(resolve => setImmediate(resolve));
-  const items = state.visibleDanmaku.value;
-  assert.equal(items.length, 3);
-  assert.equal(new Set(items.map(item => item.color)).size, 3);
+  assert.equal(new Set([10, 100, 500].map(likes => state.danmakuColor({ likes }))).size, 3);
+});
+
+test('danmaku engine receives episode comments and is replaced when switching episodes', async () => {
+  const instances = [];
+  class FakeDanmaku {
+    constructor(options) { this.options = options; instances.push(this); }
+    destroy() { this.destroyed = true; }
+    resize() {}
+  }
+  const state = client(async url => url.startsWith('/api/danmaku/')
+    ? response({ success: true, items: [{ time: 2, text: url.includes('111111') ? 'first' : 'second', likes: 0 }] })
+    : response({ series_id: '123456', episodes: [{ vid: '111111', vid_index: 1 }, { vid: '222222', vid_index: 2 }] }),
+  { Danmaku: FakeDanmaku });
+  state.videoEl.value = { pause() {}, play() { return Promise.resolve(); } };
+  state.danmakuLayer.value = { offsetWidth: 800, offsetHeight: 96 };
+  await state.openTheater({ series_id: '123456' });
+  await new Promise(resolve => setImmediate(resolve));
+  const first = instances.at(-1);
+  assert.equal(first.options.comments[0].time, 2);
+  assert.equal(first.options.speed, 80);
+  state.switchEpisode({ vid_index: 2 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(first.destroyed, true);
+  assert.notEqual(instances.at(-1), first);
+  assert.equal(instances.at(-1).options.comments.length, 1);
 });

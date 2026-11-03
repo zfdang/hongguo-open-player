@@ -2607,7 +2607,7 @@ html.platform-win .app-header { padding-right: 160px; }
 @media (prefers-reduced-motion: reduce) { .skeleton-cover, .skeleton-line { animation: none; } }
 
 .danmaku-layer { container-type: inline-size; position: absolute; inset: 60px 0 auto; height: 96px; overflow: hidden; pointer-events: none; z-index: 2; }
-.danmaku-item { position: absolute; left: 100%; white-space: nowrap; font-size: 20px; font-weight: 600; line-height: 30px; -webkit-text-stroke: 0.5px #000; paint-order: stroke fill; text-shadow: 0 1px 2px #000, 1px 1px 3px #000; }
+.danmaku-item { display: inline-block; white-space: nowrap; font-size: 20px; font-weight: 600; line-height: 30px; -webkit-text-stroke: 0.5px #000; paint-order: stroke fill; text-shadow: 0 1px 2px #000, 1px 1px 3px #000; }
 .danmaku-setting { display: flex; align-items: center; gap: 3px; font-size: 12px; white-space: nowrap; }
 .danmaku-setting input { width: 60px; }
 
@@ -2624,7 +2624,6 @@ html.platform-win .app-header { padding-right: 160px; }
 .danmaku-panel-row input { flex: 1; min-width: 0; accent-color: var(--accent); }
 .danmaku-status { margin-top: 12px; color: var(--text-dim); font-size: 12px; }
 .danmaku-status button { border: 0; background: none; color: var(--accent); cursor: pointer; }
-.danmaku-item { will-change: transform; }
 
 .danmaku-likes { font-size: 0.58em; line-height: 1; vertical-align: super; margin-left: 3px; font-weight: 600; }
 
