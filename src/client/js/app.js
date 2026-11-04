@@ -1384,7 +1384,7 @@ createApp({
     function handleGlobalPointerDown(e) {
       if (showDanmakuSettings.value && !e.target?.closest?.('.danmaku-control')) showDanmakuSettings.value = false;
       if (viewMode.value !== 'theater') return;
-      if (isTextEditingTarget(e.target)) return;
+      if (isTextEditingTarget(e.target) || e.target?.closest?.('.search-box')) return;
       const btn = e.target?.closest?.('button');
       if (btn) {
         btn.blur?.();
@@ -1393,7 +1393,7 @@ createApp({
 
     function handleGlobalFocusIn(e) {
       if (viewMode.value !== 'theater') return;
-      if (isTextEditingTarget(e.target)) return;
+      if (isTextEditingTarget(e.target) || e.target?.closest?.('.search-box')) return;
       // 避免控制按钮、全屏按钮、选集方块或滑块截留焦点，保持焦点常驻在播放器主体上
       if (e.target?.tagName === 'BUTTON' || (e.target?.tagName === 'INPUT' && e.target.type === 'range') || e.target?.tagName === 'SELECT') {
         e.target.blur?.();
@@ -1407,7 +1407,7 @@ createApp({
         showAppMenu.value = false;
       }
       if (viewMode.value !== 'theater') return;
-      if (isTextEditingTarget(e.target)) return;
+      if (isTextEditingTarget(e.target) || e.target?.closest?.('.search-box')) return;
       const btn = e.target?.closest?.('button');
       if (btn) {
         btn.blur?.();

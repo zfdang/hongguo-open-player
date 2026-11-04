@@ -1045,6 +1045,38 @@ test('search history selection searches again and supports removal', async () =>
   assert.equal(stored.length, 0);
 });
 
+test('search history controls retain focus in theater without changing player controls', () => {
+  const listeners = {};
+  let playerFocuses = 0;
+  let blurs = 0;
+  const player = { focus() { playerFocuses++; } };
+  const doc = {
+    documentElement: { classList: { add() {} } },
+    addEventListener(name, fn) { listeners[name] = fn; },
+    querySelector(selector) { return selector === '.player-container' ? player : null; }
+  };
+  const state = client(async () => response([]), {
+    document: doc,
+    window: { addEventListener(name, fn) { listeners[name] = fn; } }
+  });
+  state.mountForTest();
+  state.viewMode.value = 'theater';
+  const button = inSearch => ({
+    tagName: 'BUTTON',
+    blur() { blurs++; },
+    closest(selector) { return selector === '.search-box' ? (inSearch ? this : null) : selector === 'button' ? this : null; }
+  });
+  const historyButton = button(true);
+  for (const name of ['pointerdown', 'focusin', 'click']) listeners[name]({ target: historyButton });
+  assert.equal(blurs, 0);
+  assert.equal(playerFocuses, 0);
+
+  const playerButton = button(false);
+  for (const name of ['pointerdown', 'focusin', 'click']) listeners[name]({ target: playerButton });
+  assert.equal(blurs, 3);
+  assert.equal(playerFocuses, 2);
+});
+
 test('late preference loading preserves changes made by the user', async () => {
   let finishPreferences;
   const updates = [];
