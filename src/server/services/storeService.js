@@ -10,6 +10,7 @@ class StoreService {
     this.state = {
       history: Object.create(null), // series_id -> { series_id, series_title, cover, episode_index, vid, position_sec, duration_sec, updated_at }
       searchHistory: [],
+      preferences: {},
       favorites: Object.create(null) // series_id -> { series_id, series_title, cover, updated_at }
     };
     this.pending = Promise.resolve();
@@ -28,6 +29,7 @@ class StoreService {
             history: Object.assign(Object.create(null), parsed.history),
             favorites: Object.assign(Object.create(null), parsed.favorites),
             searchHistory: Array.isArray(parsed.searchHistory) ? parsed.searchHistory.filter(x => typeof x === 'string').slice(0, 10) : [],
+            preferences: this.validPreferences(parsed.preferences),
             mtimeMs: stats.mtimeMs
           };
         }
@@ -43,7 +45,7 @@ class StoreService {
       if (stat.mtimeMs !== this.lastLoadedMtime) {
         const disk = this.readDiskState();
         if (disk) {
-          this.state = { history: disk.history, favorites: disk.favorites, searchHistory: disk.searchHistory };
+          this.state = { history: disk.history, favorites: disk.favorites, searchHistory: disk.searchHistory, preferences: disk.preferences };
           this.lastLoadedMtime = disk.mtimeMs;
           this.loadError = null;
         }
@@ -61,6 +63,7 @@ class StoreService {
         if (!parsed || ['history', 'favorites'].some(field => !parsed[field] || typeof parsed[field] !== 'object' || Array.isArray(parsed[field]))) throw new Error('Invalid user data');
         for (const field of ['history', 'favorites']) this.state[field] = Object.assign(Object.create(null), parsed[field]);
         this.state.searchHistory = Array.isArray(parsed.searchHistory) ? parsed.searchHistory.filter(x => typeof x === 'string').slice(0, 10) : [];
+        this.state.preferences = this.validPreferences(parsed.preferences);
         this.lastLoadedMtime = stats.mtimeMs;
         this.loadError = null;
         return;
@@ -115,6 +118,35 @@ class StoreService {
     if (!item || typeof item.series_id !== 'string' || !/^\d{1,30}$/.test(item.series_id)) {
       throw Object.assign(new Error('无效的 series_id'), { status: 400 });
     }
+  }
+
+  validPreferences(value) {
+    const valid = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return valid;
+    if (typeof value.danmakuEnabled === 'boolean') valid.danmakuEnabled = value.danmakuEnabled;
+    if ([1, 3, 5].includes(value.danmakuRows)) valid.danmakuRows = value.danmakuRows;
+    if (typeof value.danmakuOpacity === 'number' && Number.isFinite(value.danmakuOpacity) && value.danmakuOpacity >= 0.1 && value.danmakuOpacity <= 1) valid.danmakuOpacity = value.danmakuOpacity;
+    if (typeof value.volume === 'number' && Number.isFinite(value.volume) && value.volume >= 0 && value.volume <= 1) valid.volume = value.volume;
+    if (typeof value.isMuted === 'boolean') valid.isMuted = value.isMuted;
+    if (['0.75', '1.0', '1.25', '1.5', '2.0'].includes(value.playbackRate)) valid.playbackRate = value.playbackRate;
+    if (['contain', 'cover'].includes(value.fitMode)) valid.fitMode = value.fitMode;
+    return valid;
+  }
+
+  getPreferences() {
+    this.reloadDiskStateIfNeeded();
+    return { ...this.state.preferences };
+  }
+
+  updatePreferences(value) {
+    const valid = this.validPreferences(value);
+    if (!Object.keys(valid).length || Object.keys(valid).length !== Object.keys(value || {}).length) {
+      throw Object.assign(new Error('无效的播放器设置'), { status: 400 });
+    }
+    return this.mutate(state => {
+      const preferences = { ...state.preferences, ...valid };
+      return { state: { ...state, preferences }, result: preferences };
+    });
   }
 
   getSearchHistory() {

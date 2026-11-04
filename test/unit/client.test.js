@@ -1044,3 +1044,21 @@ test('search history selection searches again and supports removal', async () =>
   assert.equal(state.searchHistory.value.length, 0);
   assert.equal(stored.length, 0);
 });
+
+test('late preference loading preserves changes made by the user', async () => {
+  let finishPreferences;
+  const updates = [];
+  const state = client((url, options) => {
+    if (url === '/api/preferences' && !options) return new Promise(resolve => { finishPreferences = resolve; });
+    if (url === '/api/preferences') { updates.push(JSON.parse(options.body)); return Promise.resolve(response({})); }
+    return Promise.resolve(response(url === '/api/search-history' ? [] : { results: [] }));
+  }, { document: { documentElement: { classList: { add() {} } }, addEventListener() {}, querySelector() { return null; } } });
+  state.mountForTest();
+  state.selectSpeed('2.0');
+  finishPreferences(response({ playbackRate: '0.75', volume: 0.5, danmakuRows: 5 }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.playbackRate.value, '2.0');
+  assert.equal(state.volume.value, 0.5);
+  assert.equal(state.danmakuRows.value, 5);
+  assert.equal(updates[0].playbackRate, '2.0');
+});

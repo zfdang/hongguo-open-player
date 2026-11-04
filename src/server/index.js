@@ -178,6 +178,12 @@ app.get('/api/stream/:vid', (req, res) => {
 /**
  * 6. 播放进度与历史
  */
+app.get('/api/preferences', (_req, res) => res.json(storeService.getPreferences()));
+app.post('/api/preferences', async (req, res) => {
+  try { res.json(await storeService.updatePreferences(req.body)); }
+  catch (err) { sendApiError(res, err); }
+});
+
 app.get('/api/search-history', (_req, res) => res.json(storeService.getSearchHistory()));
 app.post('/api/search-history', async (req, res) => {
   try {

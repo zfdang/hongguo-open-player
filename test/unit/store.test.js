@@ -89,3 +89,19 @@ test('search history is bounded, deduplicated, persistent and removable', async 
   assert.deepEqual(new Store(dir).getSearchHistory(), []);
   assert.throws(() => store.updateSearchHistory('add', '  '));
 });
+
+test('player preferences persist with existing data and reject invalid values', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'player-prefs-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const store = new Store(dir);
+  await store.updateProgress({ series_id: '123', position_sec: 8 });
+  await store.updatePreferences({ volume: 0, isMuted: true, danmakuEnabled: false, danmakuRows: 5, danmakuOpacity: 0.4, playbackRate: '1.5', fitMode: 'cover' });
+  await store.updatePreferences({ volume: 0.5 });
+  const loaded = new Store(dir);
+  assert.equal(loaded.getPreferences().volume, 0.5);
+  assert.equal(loaded.getPreferences().danmakuEnabled, false);
+  assert.equal(loaded.getPreferences().fitMode, 'cover');
+  assert.equal(loaded.getSeriesProgress('123').position_sec, 8);
+  assert.throws(() => loaded.updatePreferences({ volume: 2 }));
+  assert.throws(() => loaded.updatePreferences({ arbitrary: true }));
+});

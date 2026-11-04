@@ -62,6 +62,7 @@ createApp({
     const showSpeedMenu = ref(false);
     function selectSpeed(rate) {
       playbackRate.value = rate;
+      savePreferences({ playbackRate: rate });
       showSpeedMenu.value = false;
       changeSpeed();
     }
@@ -132,6 +133,32 @@ createApp({
       stopDanmakuAnimation();
       nextTick(startDanmakuAnimation);
     }
+    const changedPreferences = new Set();
+    let preferencesQueue = Promise.resolve();
+    function savePreferences(values) {
+      Object.keys(values).forEach(key => changedPreferences.add(key));
+      preferencesQueue = preferencesQueue.then(async () => {
+        const response = await fetch('/api/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
+        if (!response.ok) throw new Error('保存失败');
+      }).catch(() => notify('播放器设置保存失败'));
+    }
+    async function loadPreferences() {
+      try {
+        const response = await fetch('/api/preferences');
+        if (!response.ok) throw new Error('读取失败');
+        const prefs = await response.json();
+        const refs = { danmakuEnabled, danmakuRows, danmakuOpacity, volume, isMuted, playbackRate, fitMode };
+        for (const [key, value] of Object.entries(prefs)) {
+          if (refs[key] && !changedPreferences.has(key)) refs[key].value = value;
+        }
+        if (!danmakuEnabled.value) stopDanmakuAnimation();
+        if (videoEl.value) {
+          videoEl.value.volume = Number(volume.value);
+          videoEl.value.muted = isMuted.value;
+          videoEl.value.playbackRate = Number(playbackRate.value);
+        }
+      } catch (_) { /* Keep defaults when stored preferences cannot be read. */ }
+    }
     const danmakuRows = ref(3);
     const danmakuOpacity = ref(0.8);
     const danmakuItems = ref([]);
@@ -162,6 +189,7 @@ createApp({
     }
     function toggleDanmaku() {
       danmakuEnabled.value = !danmakuEnabled.value;
+      savePreferences({ danmakuEnabled: danmakuEnabled.value });
       if (danmakuEnabled.value) { loadDanmaku(true); nextTick(startDanmakuAnimation); }
       else { stopDanmakuAnimation(); danmakuRequest++; danmakuKey = ''; danmakuItems.value = []; }
     }
@@ -1019,6 +1047,7 @@ createApp({
     function toggleMute() {
       if (!videoEl.value) return;
       isMuted.value = !isMuted.value;
+      savePreferences({ isMuted: isMuted.value });
       videoEl.value.muted = isMuted.value;
       keepPlayerFocus();
     }
@@ -1027,6 +1056,7 @@ createApp({
     const fitMode = ref('contain');
     function toggleFitMode() {
       fitMode.value = fitMode.value === 'contain' ? 'cover' : 'contain';
+      savePreferences({ fitMode: fitMode.value });
       keepPlayerFocus();
     }
 
@@ -1374,6 +1404,7 @@ createApp({
     }
 
     onMounted(() => {
+      loadPreferences();
       loadSearchHistory();
       loadCatalog();
       window.addEventListener('keydown', handleKeyDown);
@@ -1416,7 +1447,7 @@ createApp({
     });
 
     return {
-      danmakuEnabled, showDanmakuSettings, danmakuRows, danmakuOpacity, danmakuStatus, danmakuLayer, danmakuColor, toggleDanmaku, loadDanmaku,
+      savePreferences, danmakuEnabled, showDanmakuSettings, danmakuRows, danmakuOpacity, danmakuStatus, danmakuLayer, danmakuColor, toggleDanmaku, loadDanmaku,
       toastText, osdMessage, sidebarOpen, isScrubbing, previewTime, previewPercent, showPreview,
       isFullscreen, isControlsHidden, resetControlsTimer, clearControlsTimer, setControlsHidden, handleWindowMouseMove,
       previewSeek, seekFromSlider, startScrubbing, finishScrubbing,

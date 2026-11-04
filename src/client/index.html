@@ -385,8 +385,8 @@
                   <button class="danmaku-button" :class="{ active: danmakuEnabled }" @click="showDanmakuSettings = !showDanmakuSettings" :aria-expanded="showDanmakuSettings" title="弹幕设置">弹幕</button>
                   <div v-if="showDanmakuSettings" class="danmaku-panel" @pointerenter="clearControlsTimer" @pointerleave="resetControlsTimer">
                     <div class="danmaku-panel-header"><strong>弹幕设置</strong><button class="danmaku-switch" :class="{ active: danmakuEnabled }" @click="toggleDanmaku" :aria-pressed="danmakuEnabled">{{ danmakuEnabled ? '已开启' : '已关闭' }}</button></div>
-                    <div class="danmaku-panel-row"><span>显示行数</span><div class="danmaku-row-options"><button v-for="n in [1, 3, 5]" :key="n" :class="{ active: danmakuRows === n }" @click="danmakuRows = n">{{ n }} 行</button></div></div>
-                    <label class="danmaku-panel-row"><span>不透明度</span><input type="range" min="0.1" max="1" step="0.1" v-model.number="danmakuOpacity" aria-label="弹幕不透明度"><span>{{ Math.round(danmakuOpacity * 100) }}%</span></label>
+                    <div class="danmaku-panel-row"><span>显示行数</span><div class="danmaku-row-options"><button v-for="n in [1, 3, 5]" :key="n" :class="{ active: danmakuRows === n }" @click="danmakuRows = n; savePreferences({ danmakuRows: n })">{{ n }} 行</button></div></div>
+                    <label class="danmaku-panel-row"><span>不透明度</span><input type="range" min="0.1" max="1" step="0.1" v-model.number="danmakuOpacity" @change="savePreferences({ danmakuOpacity })" aria-label="弹幕不透明度"><span>{{ Math.round(danmakuOpacity * 100) }}%</span></label>
                     <div v-if="danmakuEnabled && danmakuStatus" class="danmaku-status">{{ danmakuStatus }} <button v-if="danmakuStatus.includes('失败')" @click="loadDanmaku(true)">重试</button></div>
                   </div>
                 </div>
@@ -404,7 +404,7 @@
                 <!-- 音量 -->
                 <div class="volume-box">
                   <button class="ctrl-btn volume-btn" @click="toggleMute">{{ isMuted ? '🔇' : '🔊' }}</button>
-                  <input type="range" min="0" max="1" step="0.05" v-model="volume" @input="changeVolume" class="volume-slider"/>
+                  <input type="range" min="0" max="1" step="0.05" v-model="volume" @input="changeVolume" @change="savePreferences({ volume: Number(volume), isMuted })" class="volume-slider"/>
                 </div>
                 <!-- 全屏 -->
                 <button class="ctrl-btn" @click="toggleFullscreen" title="全屏 (F)">⛶</button>
