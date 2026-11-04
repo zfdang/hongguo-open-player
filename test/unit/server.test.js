@@ -161,3 +161,21 @@ test('all GitHub Actions workflow files are valid YAML', async () => {
     }
   }
 });
+
+test('near-end prefetch endpoint requires a session and validates the episode', async t => {
+  const service = require('../../src/server/services/streamService');
+  const original = service.prefetch;
+  const calls = [];
+  service.prefetch = (...args) => calls.push(args);
+  t.after(() => { service.prefetch = original; });
+  const { server, port } = await startServer(0);
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${port}`;
+  assert.equal((await fetch(`${base}/api/prefetch/123`, { method: 'POST' })).status, 401);
+  const home = await fetch(base);
+  const cookie = home.headers.get('set-cookie').split(';')[0];
+  const options = { method: 'POST', headers: { Cookie: cookie } };
+  assert.equal((await fetch(`${base}/api/prefetch/invalid`, options)).status, 400);
+  assert.equal((await fetch(`${base}/api/prefetch/123`, options)).status, 202);
+  assert.deepEqual(calls, [['123', 'auto', true, 45000]]);
+});
