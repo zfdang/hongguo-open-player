@@ -1211,9 +1211,9 @@ html.platform-mac .app-header {
 }
 
 .group-tab-item.active {
-  background-color: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  background-color: #423039;
+  border-color: #86616d;
+  color: #f1e2e6;
   font-weight: 600;
 }
 
@@ -1250,11 +1250,10 @@ html.platform-mac .app-header {
 }
 
 .episode-btn.active {
-  background-color: var(--accent);
-  border-color: var(--accent);
+  background-color: #503740;
+  border-color: #a37380;
   color: #fff;
   font-weight: 700;
-  box-shadow: 0 4px 12px var(--accent-glow);
 }
 
 .episode-btn.watched:not(.active) {
