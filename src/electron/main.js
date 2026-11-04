@@ -83,6 +83,23 @@ async function buildWindow() {
     try { if (new URL(url).origin === appUrl) return; } catch (_) {}
     event.preventDefault();
   };
+  let recoveryPending = false;
+  window.webContents.on('render-process-gone', async (_event, details) => {
+    if (details.reason === 'clean-exit' || recoveryPending || mainWindow !== window || window.isDestroyed?.()) return;
+    recoveryPending = true;
+    try {
+      const result = await dialog.showMessageBox(window, {
+        type: 'warning', title: '播放器界面已停止', message: '播放器界面意外停止运行',
+        detail: '可以重新加载界面，播放进度将从最近保存的位置恢复。',
+        buttons: ['重新加载', '稍后处理'], defaultId: 0, cancelId: 1, noLink: true
+      });
+      if (result.response === 0 && mainWindow === window && !window.isDestroyed?.() && !window.webContents.isDestroyed?.()) window.webContents.reload();
+    } catch (error) {
+      console.error('Renderer recovery failed:', error);
+    } finally {
+      recoveryPending = false;
+    }
+  });
   window.webContents.on('will-navigate', guardNavigation);
   window.webContents.on('will-redirect', guardNavigation);
   window.on('closed', () => {

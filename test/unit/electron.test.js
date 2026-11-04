@@ -11,7 +11,7 @@ for (const platform of ['darwin', 'win32', 'linux']) test(`desktop lifecycle and
   const windows = [];
   class Window extends EventEmitter {
     static getAllWindows() { return windows.filter(w => !w.closed); }
-    constructor(options) { super(); this.options = options; this.webContents = new EventEmitter(); this.webContents.setWindowOpenHandler = handler => { this.open = handler; }; windows.push(this); }
+    constructor(options) { super(); this.options = options; this.webContents = new EventEmitter(); this.webContents.reload = () => { this.reloads = (this.reloads || 0) + 1; }; this.webContents.setWindowOpenHandler = handler => { this.open = handler; }; windows.push(this); }
     async loadURL() { this.emit('ready-to-show'); }
     show() { this.shown = true; }
     focus() {}
@@ -32,6 +32,10 @@ for (const platform of ['darwin', 'win32', 'linux']) test(`desktop lifecycle and
   vm.runInNewContext(fs.readFileSync(require.resolve('../../src/electron/main.js'), 'utf8'), context);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(windows[0].shown, true);
+  windows[0].webContents.emit('render-process-gone', {}, { reason: 'crashed' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(windows[0].reloads, 1);
+  assert.ok(require('../../package.json').build.files.includes('build/icon.png'));
   if (platform === 'win32') {
     assert.equal(windows[0].options.titleBarStyle, 'hidden');
     assert.equal(windows[0].options.titleBarOverlay.height, 40);
