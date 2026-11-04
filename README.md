@@ -69,7 +69,6 @@
 
 * [🚀 快速开始与安装指南](docs/快速开始.md)
 * [🎮 播放器交互设计与键盘焦点](docs/播放器交互设计.md)
-* [🛠️ 综合审查落实记录与实现边界](docs/review-implementation.md)
 * [📐 产品设计与技术架构（早期方案）](docs/产品设计与技术架构.md)
 * [🔍 参考项目架构解析：hongguo-player](docs/hongguo-player-architecture.md)
 * [🔍 参考项目架构解析：hongguo-drama](docs/hongguo-drama-architecture.md)

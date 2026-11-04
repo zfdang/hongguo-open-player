@@ -5,3 +5,7 @@ data/*.json
 .DS_Store
 *.log
 *.apk
+
+# 本地审计与审查记录
+/reviews/
+/docs/review-implementation.md
