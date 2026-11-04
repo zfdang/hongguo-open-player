@@ -64,3 +64,20 @@ test('resetting playback device clears cached registration and creates a new ide
   const third = await getDevice(request);
   assert.notEqual(first.cdid, third.cdid);
 });
+
+
+test('stale failures cannot reset a replacement device or its pending registration', async () => {
+  const getDevice = createPlaybackDeviceRegistrar();
+  const first = await getDevice(async () => success);
+  assert.equal(getDevice.reset(first), true);
+  let finish;
+  const pending = getDevice(() => new Promise(resolve => { finish = resolve; }));
+  await Promise.resolve();
+  assert.equal(getDevice.reset(first), false);
+  assert.equal(getDevice(() => { throw new Error('duplicate registration'); }), pending);
+  finish(success);
+  const next = await pending;
+  assert.notEqual(next.cdid, first.cdid);
+  assert.equal(getDevice.reset(first), false);
+  assert.equal(await getDevice(() => { throw new Error('unexpected registration'); }), next);
+});
