@@ -1,4 +1,4 @@
-/* Danmaku 2.0.10, MIT licensed; see danmaku.LICENSE. Media position uses the video timeline for playback-rate and seek synchronization. */
+/* Danmaku 2.0.10, MIT licensed; see danmaku.LICENSE. Media position follows the video timeline; RTL allocation skips comments without a safe gap. */
 (function (global, factory) {
   typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
   typeof define === 'function' && define.amd ? define(factory) :
@@ -188,6 +188,30 @@
   function allocate(cmt) {
     var that = this;
     var ct = this.media ? this.media.currentTime : now() / 1000;
+    if (cmt.mode === 'rtl') {
+      var duration = this._.duration;
+      var width = this._.width;
+      var start = this.media ? cmt.time : cmt._utc;
+      var running = this._.runningList;
+      var xAt = function(comment, time) {
+        var commentStart = that.media ? comment.time : comment._utc;
+        return width - (width + comment.width) * (time - commentStart) / duration;
+      };
+      for (var y = 0; y + cmt.height <= this._.height; y += Math.max(1, cmt.height)) {
+        var available = true;
+        for (var index = 0; index < running.length; index++) {
+          var previous = running[index];
+          if (previous.mode !== 'rtl' || y >= previous.y + previous.height || y + cmt.height <= previous.y) continue;
+          var previousStart = this.media ? previous.time : previous._utc;
+          var end = Math.min(start + duration, previousStart + duration);
+          var gapNow = xAt(cmt, ct) - xAt(previous, ct) - previous.width;
+          var gapEnd = xAt(cmt, end) - xAt(previous, end) - previous.width;
+          if (Math.min(gapNow, gapEnd) < 8) { available = false; break; }
+        }
+        if (available) return y;
+      }
+      return null;
+    }
     function willCollide(cr, cmt) {
       if (cmt.mode === 'top' || cmt.mode === 'bottom') {
         return ct - cr.time < that._.duration;
@@ -285,6 +309,10 @@
       for (i = 0; i < pendingList.length; i++) {
         cmt = pendingList[i];
         cmt.y = allocate.call(this, cmt);
+        if (cmt.y === null) {
+          remove(this._.stage, cmt);
+          continue;
+        }
         this._.runningList.push(cmt);
       }
       for (i = 0; i < this._.runningList.length; i++) {
