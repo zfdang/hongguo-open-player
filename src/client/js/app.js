@@ -86,7 +86,6 @@ createApp({
     const danmakuEnabled = ref(true);
     const showDanmakuSettings = ref(false);
     const danmakuLayer = ref(null);
-    const danmakuTestEnabled = ref(false);
     let danmakuEngine = null;
     let danmakuResizeObserver = null;
     function stopDanmakuAnimation() {
@@ -98,8 +97,7 @@ createApp({
     function startDanmakuAnimation() {
       if (danmakuEngine || !danmakuEnabled.value || !videoEl.value || !danmakuLayer.value || typeof Danmaku === 'undefined') return;
       const layer = danmakuLayer.value;
-      const items = danmakuTestEnabled.value ? danmakuItems.value.concat(makeTestDanmaku()) : danmakuItems.value;
-      const comments = items.map(item => ({
+      const comments = danmakuItems.value.map(item => ({
         time: item.time,
         render() {
           const text = document.createElement('span');
@@ -129,22 +127,6 @@ createApp({
     function refreshDanmakuEngine() {
       stopDanmakuAnimation();
       nextTick(startDanmakuAnimation);
-    }
-    function makeTestDanmaku() {
-      const samples = [
-        '短', '这个场景看起来怎么样？', '这是一条比较长的测试弹幕，用来观察文字清晰度、滚动速度和密集时的排版效果。',
-        '哈哈哈哈', '一起看看接下来会发生什么', '字数不同的弹幕交错出现，测试屏幕空间和可读性', '好！',
-        '这条弹幕稍微长一点，看看不同点赞数和颜色是否容易分辨。'
-      ];
-      const likes = [0, 1, 20, 100, 500, 999, 7, 42];
-      const seconds = Number.isFinite(duration.value) && duration.value > 0 ? Math.min(duration.value, 1800) : 1800;
-      return Array.from({ length: Math.ceil(seconds) }, (_, i) => ({
-        time: i, text: '[测试] ' + samples[i % samples.length], likes: likes[(i * 3) % likes.length]
-      }));
-    }
-    function toggleDanmakuTest() {
-      danmakuTestEnabled.value = !danmakuTestEnabled.value;
-      refreshDanmakuEngine();
     }
     const danmakuRows = ref(3);
     const danmakuOpacity = ref(0.8);
@@ -815,7 +797,6 @@ createApp({
     // ================= 沉浸式剧场与播放逻辑 =================
 
     function resetPlayback() {
-      danmakuTestEnabled.value = false;
       stopDanmakuAnimation();
       progressReady = false;
       pendingResumeSec = 0;
@@ -1093,7 +1074,6 @@ createApp({
       if (videoEl.value) {
         progressReady = true;
         duration.value = videoEl.value.duration || 0;
-        if (danmakuTestEnabled.value) refreshDanmakuEngine();
         videoEl.value.volume = Number(volume.value);
         videoEl.value.muted = isMuted.value;
         if (navigator.mediaSession && typeof MediaMetadata !== 'undefined') {
@@ -1395,7 +1375,7 @@ createApp({
     });
 
     return {
-      danmakuEnabled, showDanmakuSettings, danmakuRows, danmakuOpacity, danmakuStatus, danmakuLayer, danmakuColor, toggleDanmaku, loadDanmaku, danmakuTestEnabled, toggleDanmakuTest,
+      danmakuEnabled, showDanmakuSettings, danmakuRows, danmakuOpacity, danmakuStatus, danmakuLayer, danmakuColor, toggleDanmaku, loadDanmaku,
       toastText, osdMessage, sidebarOpen, isScrubbing, previewTime, previewPercent, showPreview,
       isFullscreen, isControlsHidden, resetControlsTimer, clearControlsTimer, setControlsHidden, handleWindowMouseMove,
       previewSeek, seekFromSlider, startScrubbing, finishScrubbing,
