@@ -81,3 +81,20 @@ test('stale failures cannot reset a replacement device or its pending registrati
   assert.equal(getDevice.reset(first), false);
   assert.equal(await getDevice(() => { throw new Error('unexpected registration'); }), next);
 });
+
+test('aborting one registration waiter does not cancel a shared registration', async () => {
+  const getDevice = createPlaybackDeviceRegistrar();
+  let finish, calls = 0;
+  const request = () => { calls++; return new Promise(resolve => { finish = resolve; }); };
+  const controller = new AbortController();
+  const cancelled = getDevice(request, controller.signal);
+  const remaining = getDevice(request);
+  await Promise.resolve();
+  controller.abort(new Error('episode changed'));
+  await assert.rejects(cancelled, /episode changed/);
+  assert.equal(calls, 1);
+  finish(success);
+  assert.equal((await remaining).device_id, '123');
+  assert.equal((await getDevice(request)).device_id, '123');
+  assert.equal(calls, 1);
+});

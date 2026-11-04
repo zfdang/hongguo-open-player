@@ -330,16 +330,17 @@ async function fetchAppPlayUrl(vid, options = {}) {
         biz_param: { detail_page_version: 0, device_level: 3, disable_digg_stat: false, need_all_video_definition: true, need_mp4_align: false, use_os_player: false, use_server_dns: false, video_platform: 1024 },
         mixed_video_id_map: { '1004': [vid] },
     });
-    const device = await getPlaybackDevice(requestJson);
+    const device = await getPlaybackDevice(requestJson, signal);
     let signed = playbackRequest(payload, device);
     let response;
     try {
         response = await requestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
     } catch (err) {
+        signal.throwIfAborted();
         if (err.code === 'EMPTY_RESPONSE' && typeof getPlaybackDevice.reset === 'function') {
             logger.warn('AppSource', 'App 接口返回空响应，尝试更新播放设备并重试...');
             getPlaybackDevice.reset(device);
-            signed = playbackRequest(payload, await getPlaybackDevice(requestJson));
+            signed = playbackRequest(payload, await getPlaybackDevice(requestJson, signal));
             response = await requestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
         } else {
             throw err;

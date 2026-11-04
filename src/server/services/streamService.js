@@ -25,6 +25,7 @@ class StreamService {
     this.plans = new Map();
     this.maxPlanBytes = 32 * 1024 * 1024;
     this.activeStreams = 0;
+    this.waitingStreams = [];
     this.streamControllers = new Set();
   }
 
@@ -248,6 +249,7 @@ class StreamService {
   }
 
   shutdown() {
+    for (const waiter of [...this.waitingStreams]) waiter.finish(false);
     for (const timer of this.prefetchTimers.values()) clearTimeout(timer);
     this.prefetchTimers.clear();
     for (const job of this.inFlight.values()) job.controller.abort(new Error('Player stopped'));
@@ -345,9 +347,47 @@ class StreamService {
     throw lastError || new Error('视频源不可用');
   }
 
+  acquireStreamSlot(res) {
+    if (res.destroyed) return false;
+    if (this.activeStreams < 3 && !this.waitingStreams.length) {
+      this.activeStreams++;
+      return true;
+    }
+    if (this.waitingStreams.length >= 6) return false;
+    return new Promise(resolve => {
+      let settled = false;
+      const waiter = { finish: admitted => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        res.removeListener?.('close', disconnected);
+        const index = this.waitingStreams.indexOf(waiter);
+        if (index >= 0) this.waitingStreams.splice(index, 1);
+        if (admitted) this.activeStreams++;
+        resolve(admitted);
+      } };
+      const disconnected = () => waiter.finish(false);
+      const timer = setTimeout(() => waiter.finish(false), 1500);
+      timer.unref?.();
+      this.waitingStreams.push(waiter);
+      res.once?.('close', disconnected);
+    });
+  }
+
+  releaseStreamSlot() {
+    this.activeStreams--;
+    while (this.activeStreams < 3 && this.waitingStreams.length) {
+      this.waitingStreams[0].finish(true);
+    }
+  }
+
   async handleStream(req, res, vid) {
-    if (this.activeStreams >= 3) { res.writeHead(503); res.end(); return; }
-    this.activeStreams++;
+    const admitted = await this.acquireStreamSlot(res);
+    if (!admitted) {
+      if (!res.destroyed) { res.writeHead(503); res.end(); }
+      return;
+    }
+    if (res.destroyed) { this.releaseStreamSlot(); return; }
     this.planPrefetch?.abort();
     const controller = new AbortController();
     this.streamControllers.add(controller);
@@ -416,8 +456,8 @@ class StreamService {
       }
     } finally {
       res.removeListener?.('close', disconnected);
-      this.activeStreams--;
       this.streamControllers.delete(controller);
+      this.releaseStreamSlot();
     }
   }
 

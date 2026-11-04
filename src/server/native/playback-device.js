@@ -69,11 +69,24 @@ function retryable(error) {
     ].includes(error.code);
 }
 
+// Cancel only this caller's wait; registration may still be shared by other requests.
+function waitForRegistration(promise, signal) {
+    if (!signal) return promise;
+    if (signal.aborted) return Promise.reject(signal.reason);
+    return new Promise((resolve, reject) => {
+        const abort = () => { cleanup(); reject(signal.reason); };
+        const cleanup = () => signal.removeEventListener('abort', abort);
+        signal.addEventListener('abort', abort, { once: true });
+        promise.then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
+    });
+}
+
 function createPlaybackDeviceRegistrar() {
     let registration;
     let request;
     let currentDevice;
-    const registrar = function getPlaybackDevice(requestJson) {
+    const registrar = function getPlaybackDevice(requestJson, signal) {
+        if (signal?.aborted) return Promise.reject(signal.reason);
         // Concurrent playback/search requests share registration. Retries reuse the
         // same encrypted payload and identity, including after an exhausted attempt.
         registration ||= Promise.resolve().then(async () => {
@@ -107,7 +120,7 @@ function createPlaybackDeviceRegistrar() {
                 code: 'DEVICE_REGISTRATION_FAILED', cause: error,
             });
         });
-        return registration;
+        return waitForRegistration(registration, signal);
     };
     registrar.reset = function resetPlaybackDevice(expectedDevice) {
         // A late failure from an old request must not discard a newer registration.
