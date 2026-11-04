@@ -61,6 +61,20 @@
 
 ---
 
+## 🍎 macOS 提示“应用已损坏，无法打开”
+
+部分用户在 macOS 上打开应用时可能遇到此提示（参见 [#59](https://github.com/zfdang/hongguo-open-player/issues/59)）。目前 macOS 安装包未使用 Apple 开发者证书签名和公证，系统的安全检查可能阻止其打开；但同样的提示也可能由下载损坏或文件被篡改引起。
+
+请先从项目的 [GitHub Releases](https://github.com/zfdang/hongguo-open-player/releases) 重新下载安装包，选择适合自己 Mac 的版本，并将应用拖入“应用程序”文件夹。如果确认应用来自官方发布页面且未被篡改，仍然无法打开，可以打开“终端”并执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/红果开源播放器.app"
+```
+
+这条命令只移除该应用及其内部文件的下载隔离标记，不会关闭整个系统的安全检查。完成后重新打开应用。如果应用安装在其他位置，请将命令中的路径替换为实际路径；也可以输入 `xattr -dr com.apple.quarantine ` 后，将应用拖到终端窗口自动填入路径。如果提示权限不足，可在同一命令前加 `sudo `，并按提示输入 Mac 的登录密码。
+
+移除隔离标记会绕过此应用的部分安全检查，请只对确认可信的文件使用。如果系统明确提示包含恶意软件，或重新下载后仍怀疑文件损坏、被篡改，请勿运行该命令。更多说明请参阅 [Apple 的安全打开应用指南](https://support.apple.com/zh-cn/102445)。
+
 ## 🏗️ 架构设计与文档
 
 当前实现采用 **Electron 桌面窗口 + Node.js / Express 本地服务 + Vue 界面**，观看历史、收藏和最近搜索以本地 JSON 文件保存。早期方案中的 SwiftUI、AVPlayer 和 SQLite 选型不代表当前实现。
