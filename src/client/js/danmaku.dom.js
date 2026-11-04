@@ -374,8 +374,18 @@
     }
     this.clear();
     resetSpace(this._.space);
-    var position = binsearch(this.comments, 'time', this.media.currentTime);
-    this._.position = Math.max(0, position - 1);
+    var earliest = Math.max(0, this.media.currentTime - this._.duration);
+    var left = 0, right = this.comments.length;
+    while (left < right) {
+      var mid = (left + right) >>> 1;
+      if (this.comments[mid].time < earliest) left = mid + 1;
+      else right = mid;
+    }
+    this._.position = left;
+    if (this._.paused && this._.visible) {
+      createEngine(this._.engine.framing.bind(this), this._.engine.setup.bind(this),
+        this._.engine.render.bind(this), this._.engine.remove.bind(this)).call(this);
+    }
     return this;
   }
 

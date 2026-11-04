@@ -30,6 +30,18 @@ app.whenReady().then(async () => {
       }
       engine.destroy();
     }
+    document.body.innerHTML = '<div id="stage" style="width:640px;height:160px"></div>';
+    const stage = document.getElementById('stage');
+    const media = new EventTarget();
+    media.currentTime = 0; media.playbackRate = 2; media.paused = true;
+    const comments = [0, 2, 2, 5, 12, 20].map((time, i) => ({ time, text:'弹幕' + i, style:{fontSize:'20px', lineHeight:'30px'} }));
+    const engine = new Danmaku({ container:stage, media, comments, speed:64 });
+    media.currentTime = 10; media.dispatchEvent(new Event('seeking'));
+    const visible = engine._.runningList.map(c => c.text);
+    if (!visible.includes('弹幕1') || !visible.includes('弹幕2') || !visible.includes('弹幕3') || visible.includes('弹幕4')) throw new Error('Paused seek did not restore in-flight comments: ' + visible);
+    media.currentTime = 3; media.dispatchEvent(new Event('seeking'));
+    if (!engine._.runningList.some(c => c.text === '弹幕1') || engine._.runningList.some(c => c.text === '弹幕3')) throw new Error('Backward seek did not restore the correct comments');
+    engine.destroy();
     return {maxVisible};
   })()`);
   if (!result.maxVisible) throw new Error('Test did not exercise dense comments');
