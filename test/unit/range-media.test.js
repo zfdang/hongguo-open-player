@@ -10,18 +10,20 @@ for (const metadataLast of [false, true]) test(`streaming random byte ranges mat
   const key = crypto.randomBytes(16);
   const encrypted = encryptedMp4(crypto.randomBytes(2 * 1024 * 1024 + 7), key, crypto.randomBytes(8), 0, { metadataLast, largeOffsets: metadataLast });
   const expected = decryptMp4Buffer(Buffer.from(encrypted), key);
-  let transferred = 0;
+  let transferred = 0, requests = 0;
   const server = http.createServer((req, res) => {
     const [, a, b] = req.headers.range.match(/bytes=(\d+)-(\d+)/);
-    const from = Number(a), to = Number(b);
+    const from = Number(a), to = Math.min(Number(b), encrypted.length - 1);
     transferred += to - from + 1;
+    requests++;
     res.writeHead(206, { 'Content-Range': `bytes ${from}-${to}/${encrypted.length}` });
     res.end(encrypted.subarray(from, to + 1));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const plan = await prepareRangeMedia({ url: `http://127.0.0.1:${server.address().port}`, contentKey: key }, () => ({}), new AbortController().signal);
-  assert.ok(transferred < 4096, 'metadata preparation must not fetch the media body');
+  assert.ok(transferred <= 65536 + 4096, 'metadata preparation must stay within the bounded prefetch budget');
+  assert.equal(requests, metadataLast ? 3 : 1);
   assert.equal(plan.size, expected.length);
   for (const [start, end] of [[0, 255], [1031, 2009], [expected.length - 100, expected.length - 1], [0, expected.length - 1]]) {
     const pieces = [];
@@ -37,4 +39,24 @@ test('a CDN ignoring Range is detected before buffering its full response', asyn
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   await assert.rejects(prepareRangeMedia({ url: `http://127.0.0.1:${server.address().port}` }, () => ({}), new AbortController().signal), { code: 'RANGE_UNSUPPORTED' });
+});
+
+
+test('prefetch handles short files and rejects malformed range responses', async t => {
+  const key = crypto.randomBytes(16);
+  const encrypted = encryptedMp4(crypto.randomBytes(128), key, crypto.randomBytes(8));
+  let malformed = false;
+  const server = http.createServer((req, res) => {
+    const [, a, b] = req.headers.range.match(/bytes=(\d+)-(\d+)/);
+    const from = Number(a), to = Math.min(Number(b), encrypted.length - 1);
+    res.writeHead(206, { 'Content-Range': `bytes ${from}-${malformed ? to - 1 : to}/${encrypted.length}` });
+    res.end(encrypted.subarray(from, to + 1));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const variant = { url: `http://127.0.0.1:${server.address().port}`, contentKey: key };
+  const plan = await prepareRangeMedia(variant, () => ({}), new AbortController().signal);
+  assert.ok(plan.size > 0);
+  malformed = true;
+  await assert.rejects(prepareRangeMedia(variant, () => ({}), new AbortController().signal), /Invalid CDN size probe/);
 });

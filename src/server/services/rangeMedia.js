@@ -9,8 +9,10 @@ async function prepareRangeMedia(variant, requestOptions, signal) {
   const options = { ...requestOptions(variant.url), maxRedirects: 0, headers, signal,
     timeout: 15000, responseType: 'arraybuffer', maxContentLength: 4 * 1024 * 1024 };
   let total;
+  let prefix;
   async function read(start, end) {
     signal?.throwIfAborted();
+    if (prefix && end < prefix.length) return prefix.subarray(start, end + 1);
     const response = await axios.get(variant.url, { ...options, headers: { ...headers, Range: `bytes=${start}-${end}` } });
     if (response.status === 200) throw Object.assign(new Error('CDN does not support byte ranges'), { code: 'RANGE_UNSUPPORTED' });
     const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(response.headers['content-range'] || '');
@@ -20,14 +22,32 @@ async function prepareRangeMedia(variant, requestOptions, signal) {
     if (!Number.isSafeInteger(total) || total < 8 || total > 1024 * 1024 * 1024) throw new Error('MP4 size exceeds supported range');
     return response.data;
   }
-  const probe = await axios.get(variant.url, { ...options, responseType: 'stream', headers: { ...headers, Range: 'bytes=0-0' } });
+  // A bounded first window combines the size probe with common front-loaded metadata.
+  const probe = await axios.get(variant.url, { ...options, responseType: 'stream', headers: { ...headers, Range: 'bytes=0-65535' } });
   probe.data.on('error', () => {});
-  probe.data.destroy();
-  if (probe.status !== 206) throw Object.assign(new Error('CDN does not support byte ranges'), { code: 'RANGE_UNSUPPORTED' });
-  const probeRange = /^bytes 0-0\/(\d+)$/.exec(probe.headers['content-range'] || '');
-  if (!probeRange) throw new Error('Invalid CDN size probe');
-  total = Number(probeRange[1]);
-  if (!Number.isSafeInteger(total) || total < 8 || total > 1024 * 1024 * 1024) throw new Error('MP4 size exceeds supported range');
+  if (probe.status !== 206) {
+    probe.data.destroy();
+    throw Object.assign(new Error('CDN does not support byte ranges'), { code: 'RANGE_UNSUPPORTED' });
+  }
+  const probeRange = /^bytes 0-(\d+)\/(\d+)$/.exec(probe.headers['content-range'] || '');
+  if (!probeRange) { probe.data.destroy(); throw new Error('Invalid CDN size probe'); }
+  const probeEnd = Number(probeRange[1]);
+  total = Number(probeRange[2]);
+  if (!Number.isSafeInteger(total) || total < 8 || total > 1024 * 1024 * 1024 ||
+      probeEnd !== Math.min(total - 1, 65535)) {
+    probe.data.destroy();
+    throw new Error('Invalid CDN size probe');
+  }
+  const chunks = [];
+  let prefixSize = 0;
+  for await (const chunk of probe.data) {
+    signal?.throwIfAborted();
+    prefixSize += chunk.length;
+    if (prefixSize > probeEnd + 1) { probe.data.destroy(); throw new Error('Invalid CDN range response'); }
+    chunks.push(chunk);
+  }
+  if (prefixSize !== probeEnd + 1) throw new Error('Invalid CDN range response');
+  prefix = Buffer.concat(chunks, prefixSize);
   const boxes = [];
   let metadata;
   for (let offset = 0; offset < total;) {
@@ -55,7 +75,7 @@ async function prepareRangeMedia(variant, requestOptions, signal) {
   logger.info('RangeMedia', `MP4 CENC元数据解析完成: 总大小=${total} 字节, Boxes=[${boxes.map(b => b.typ).join(',')}], moov大小=${metadata.length} 字节, CENC加密样本数=${plan.samples.length}`);
   // The metadata request signal belongs to a single acquisition. Each response
   // receives its own cancellation signal, so cached plans outlive closed requests.
-  return { size: plan.size, bytes: metadata.length * 2 + plan.samples.length * 160 + plan.segments.length * 64, async *read(start, end, responseSignal) {
+  return { size: plan.size, bytes: prefix.length + metadata.length * 2 + plan.samples.length * 160 + plan.segments.length * 64, async *read(start, end, responseSignal) {
     for (const segment of plan.segments) {
       responseSignal?.throwIfAborted();
       const from = Math.max(start, segment.start), to = Math.min(end, segment.start + segment.size - 1);
