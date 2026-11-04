@@ -887,8 +887,8 @@ html.platform-mac .app-header {
   top: 10px;
   left: 0;
   height: 4px;
-  background: linear-gradient(90deg, #bc7184 0%, #d396a4 100%);
-  box-shadow: 0 0 4px rgba(188, 113, 132, 0.2);
+  background: linear-gradient(90deg, #c84c59 0%, #dc6973 100%);
+  box-shadow: 0 0 4px rgba(200, 76, 89, 0.2);
   border-radius: 2px;
   pointer-events: none;
   transition: width 0.1s linear, height 0.15s ease, top 0.15s ease;
@@ -899,7 +899,7 @@ html.platform-mac .app-header {
   top: 9px;
   height: 6px;
   border-radius: 3px;
-  box-shadow: 0 0 6px rgba(188, 113, 132, 0.3);
+  box-shadow: 0 0 6px rgba(200, 76, 89, 0.3);
 }
 
 .progress-bar-thumb {
@@ -911,7 +911,7 @@ html.platform-mac .app-header {
   border-radius: 50%;
   transform: translate(-50%, -50%) scale(0.6);
   opacity: 0;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45), 0 0 4px rgba(188, 113, 132, 0.25);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45), 0 0 4px rgba(200, 76, 89, 0.25);
   pointer-events: none;
   z-index: 1;
   transition: opacity 0.15s ease, transform 0.15s ease;
@@ -990,7 +990,7 @@ html.platform-mac .app-header {
 
 .volume-slider {
   width: 70px;
-  accent-color: #c88898;
+  accent-color: #d45d69;
   cursor: pointer;
 }
 
@@ -1211,9 +1211,9 @@ html.platform-mac .app-header {
 }
 
 .group-tab-item.active {
-  background-color: #423039;
-  border-color: #86616d;
-  color: #f1e2e6;
+  background-color: #63343c;
+  border-color: #a65965;
+  color: #f8e8ea;
   font-weight: 600;
 }
 
@@ -1250,8 +1250,8 @@ html.platform-mac .app-header {
 }
 
 .episode-btn.active {
-  background-color: #503740;
-  border-color: #a37380;
+  background-color: #81404a;
+  border-color: #c46a76;
   color: #fff;
   font-weight: 700;
 }
