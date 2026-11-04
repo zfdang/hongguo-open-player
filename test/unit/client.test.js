@@ -1004,7 +1004,7 @@ test('danmaku engine receives episode comments and is replaced when switching ep
   const state = client(async url => url.startsWith('/api/danmaku/')
     ? response({ success: true, items: [{ time: 2, text: url.includes('111111') ? 'first' : 'second', likes: 0 }] })
     : response({ series_id: '123456', episodes: [{ vid: '111111', vid_index: 1 }, { vid: '222222', vid_index: 2 }] }),
-  { Danmaku: FakeDanmaku });
+  { Danmaku: FakeDanmaku, document: { documentElement: { classList: { add() {} } }, createElement: () => ({ style: {}, children: [], appendChild(child) { this.children.push(child); } }) } });
   state.videoEl.value = { pause() {}, play() { return Promise.resolve(); } };
   state.danmakuLayer.value = { offsetWidth: 800, offsetHeight: 96 };
   await state.openTheater({ series_id: '123456' });
@@ -1012,6 +1012,17 @@ test('danmaku engine receives episode comments and is replaced when switching ep
   const first = instances.at(-1);
   assert.equal(first.options.comments[0].time, 2);
   assert.equal(first.options.speed, 80);
+  state.duration.value = 8;
+  state.toggleDanmakuTest();
+  const withTests = instances.at(-1).options.comments;
+  assert.equal(withTests.length, 17);
+  const rendered = withTests.slice(1).map(comment => comment.render());
+  assert.ok(rendered.every(node => node.textContent.startsWith('[测试] ')));
+  assert.ok(new Set(rendered.map(node => node.textContent.length)).size > 3);
+  assert.ok(rendered.some(node => node.children[0]?.textContent === '+500'));
+  assert.ok(rendered.some(node => node.children.length === 0));
+  state.toggleDanmakuTest();
+  assert.equal(instances.at(-1).options.comments.length, 1);
   state.switchEpisode({ vid_index: 2 });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(first.destroyed, true);
