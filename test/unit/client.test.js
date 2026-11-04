@@ -1080,3 +1080,21 @@ test('prefetch is requested near the end using remaining playback time', async (
   state.onTimeUpdate(); state.onTimeUpdate();
   assert.equal(calls.filter(([url, options]) => url === '/api/prefetch/222' && options.method === 'POST').length, 1);
 });
+
+test('danmaku settings close on outside pointer interactions but remain open inside', () => {
+  const listeners = {};
+  const state = client(async () => response([]), {
+    document: { documentElement: { classList: { add() {} } }, addEventListener(name, fn) { listeners[name] = fn; }, removeEventListener() {} },
+    window: { addEventListener() {}, removeEventListener() {} }
+  });
+  state.mountForTest();
+  state.viewMode.value = 'theater';
+  state.showDanmakuSettings.value = true;
+  listeners.pointerdown({ target: { tagName: 'INPUT', type: 'range', closest: selector => selector === '.danmaku-control' ? {} : null } });
+  assert.equal(state.showDanmakuSettings.value, true);
+  listeners.pointerdown({ target: { tagName: 'INPUT', type: 'text', closest: () => null } });
+  assert.equal(state.showDanmakuSettings.value, false);
+  state.showDanmakuSettings.value = true;
+  listeners.pointerdown({ target: { tagName: 'BUTTON', closest: () => null } });
+  assert.equal(state.showDanmakuSettings.value, false);
+});

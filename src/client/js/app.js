@@ -1382,6 +1382,7 @@ createApp({
     }
 
     function handleGlobalPointerDown(e) {
+      if (showDanmakuSettings.value && !e.target?.closest?.('.danmaku-control')) showDanmakuSettings.value = false;
       if (viewMode.value !== 'theater') return;
       if (isTextEditingTarget(e.target)) return;
       const btn = e.target?.closest?.('button');
