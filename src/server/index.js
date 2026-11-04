@@ -178,6 +178,15 @@ app.get('/api/stream/:vid', (req, res) => {
 /**
  * 6. 播放进度与历史
  */
+app.get('/api/search-history', (_req, res) => res.json(storeService.getSearchHistory()));
+app.post('/api/search-history', async (req, res) => {
+  try {
+    res.json(await storeService.updateSearchHistory(req.body?.action, req.body?.keyword));
+  } catch (err) {
+    sendApiError(res, err);
+  }
+});
+
 app.get('/api/history', (req, res) => {
   res.json(storeService.getHistory());
 });

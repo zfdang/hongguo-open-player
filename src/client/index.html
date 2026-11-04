@@ -29,17 +29,28 @@
       </div>
 
       <div class="header-right">
-        <div class="search-box" :class="{ 'has-query': searchKeyword.trim() }">
+        <div class="search-box" :class="{ 'has-query': searchKeyword.trim() }" @focusout="onSearchFocusOut" @keydown.esc="showSearchHistory = false">
           <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
           <input 
             type="text" 
             v-model="searchKeyword" 
-            @keydown.enter="handleSearch" 
+            @focus="showSearchHistory = true"
+            @click="showSearchHistory = true"
+            @keydown.enter="!$event.isComposing && handleSearch()"
+            :aria-expanded="showSearchHistory && searchHistory.length > 0"
+            aria-controls="search-history"
             placeholder="搜索短剧"
             aria-label="搜索短剧名、主角或题材"
           />
           <button v-if="searchKeyword" class="clear-btn" @click="searchKeyword = ''">✕</button>
           <button class="search-btn" @click="handleSearch">搜索</button>
+          <div v-if="showSearchHistory && searchHistory.length" id="search-history" class="search-history">
+            <div class="search-history-header"><span>最近搜索</span><button type="button" @click="updateSearchHistory('clear')">清空</button></div>
+            <div v-for="item in searchHistory" :key="item" class="search-history-row">
+              <button type="button" class="search-history-keyword" @click="selectSearchHistory(item)">{{ item }}</button>
+              <button type="button" class="search-history-remove" :aria-label="'删除搜索历史：' + item" @click="updateSearchHistory('remove', item)">×</button>
+            </div>
+          </div>
         </div>
 
         <!-- 菜单与帮助入口 (类似 Android 三横线菜单图标) -->

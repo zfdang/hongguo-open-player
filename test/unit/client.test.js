@@ -19,7 +19,7 @@ const response = data => ({ ok: true, json: async () => data });
 
 test('late catalog responses cannot replace the active tab; search pagination keeps keyword', async () => {
   const requests = [];
-  const state = client(url => new Promise(resolve => requests.push({ url, resolve })));
+  const state = client(url => url === '/api/search-history' ? Promise.resolve(response([])) : new Promise(resolve => requests.push({ url, resolve })));
   const first = state.loadCatalog();
   state.switchTab('favorites');
   requests[1].resolve(response([{ series_id: '2' }]));
@@ -1017,4 +1017,30 @@ test('danmaku engine receives episode comments and is replaced when switching ep
   assert.equal(first.destroyed, true);
   assert.notEqual(instances.at(-1), first);
   assert.equal(instances.at(-1).options.comments.length, 1);
+});
+
+test('search history selection searches again and supports removal', async () => {
+  const calls = [];
+  let stored = [];
+  const state = client(async (url, options) => {
+    calls.push(url);
+    if (url === '/api/search-history' && options?.method === 'POST') {
+      const { action, keyword } = JSON.parse(options.body);
+      stored = action === 'clear' ? [] : action === 'add' ? [keyword, ...stored.filter(x => x !== keyword)].slice(0, 10) : stored.filter(x => x !== keyword);
+      return response(stored);
+    }
+    return response({ results: [], hasMore: false });
+  });
+  state.searchKeyword.value = '  月亮  ';
+  await state.handleSearch();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.searchHistory.value[0], '月亮');
+  state.selectSearchHistory('月亮');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.filter(url => url.startsWith('/api/search?keyword=')).length, 2);
+  assert.equal(state.showSearchHistory.value, false);
+  state.updateSearchHistory('remove', '月亮');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.searchHistory.value.length, 0);
+  assert.equal(stored.length, 0);
 });

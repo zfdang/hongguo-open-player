@@ -9,6 +9,7 @@ class StoreService {
     this.dataFile = path.join(this.dataDir, 'user_data.json');
     this.state = {
       history: Object.create(null), // series_id -> { series_id, series_title, cover, episode_index, vid, position_sec, duration_sec, updated_at }
+      searchHistory: [],
       favorites: Object.create(null) // series_id -> { series_id, series_title, cover, updated_at }
     };
     this.pending = Promise.resolve();
@@ -26,6 +27,7 @@ class StoreService {
           return {
             history: Object.assign(Object.create(null), parsed.history),
             favorites: Object.assign(Object.create(null), parsed.favorites),
+            searchHistory: Array.isArray(parsed.searchHistory) ? parsed.searchHistory.filter(x => typeof x === 'string').slice(0, 10) : [],
             mtimeMs: stats.mtimeMs
           };
         }
@@ -41,7 +43,7 @@ class StoreService {
       if (stat.mtimeMs !== this.lastLoadedMtime) {
         const disk = this.readDiskState();
         if (disk) {
-          this.state = { history: disk.history, favorites: disk.favorites };
+          this.state = { history: disk.history, favorites: disk.favorites, searchHistory: disk.searchHistory };
           this.lastLoadedMtime = disk.mtimeMs;
           this.loadError = null;
         }
@@ -58,6 +60,7 @@ class StoreService {
         const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
         if (!parsed || ['history', 'favorites'].some(field => !parsed[field] || typeof parsed[field] !== 'object' || Array.isArray(parsed[field]))) throw new Error('Invalid user data');
         for (const field of ['history', 'favorites']) this.state[field] = Object.assign(Object.create(null), parsed[field]);
+        this.state.searchHistory = Array.isArray(parsed.searchHistory) ? parsed.searchHistory.filter(x => typeof x === 'string').slice(0, 10) : [];
         this.lastLoadedMtime = stats.mtimeMs;
         this.loadError = null;
         return;
@@ -112,6 +115,24 @@ class StoreService {
     if (!item || typeof item.series_id !== 'string' || !/^\d{1,30}$/.test(item.series_id)) {
       throw Object.assign(new Error('无效的 series_id'), { status: 400 });
     }
+  }
+
+  getSearchHistory() {
+    this.reloadDiskStateIfNeeded();
+    return [...this.state.searchHistory];
+  }
+
+  updateSearchHistory(action, value) {
+    if (!['add', 'remove', 'clear'].includes(action) ||
+        (action !== 'clear' && (typeof value !== 'string' || !value.trim() || value.trim().length > 200))) {
+      throw Object.assign(new Error('无效的搜索历史'), { status: 400 });
+    }
+    const keyword = action === 'clear' ? '' : value.trim();
+    return this.mutate(state => {
+      const remaining = state.searchHistory.filter(item => item !== keyword);
+      const searchHistory = action === 'clear' ? [] : action === 'add' ? [keyword, ...remaining].slice(0, 10) : remaining;
+      return { state: { ...state, searchHistory }, result: searchHistory };
+    });
   }
 
   /**

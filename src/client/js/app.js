@@ -12,6 +12,10 @@ createApp({
     const viewMode = ref('catalog'); // 'catalog' | 'theater'
     const currentTab = ref('hot-drama'); // 'hot-drama' | 'real-drama' | 'comic-drama' | 'ai-drama' | 'history' | 'favorites' | 'search'
     const searchKeyword = ref('');
+    const searchHistory = ref([]);
+    const showSearchHistory = ref(false);
+    let searchHistoryRevision = 0;
+    let searchHistoryQueue = Promise.resolve();
     const hotTags = ref(['离婚', '战神', '重生', '逆袭', '神医', '千金', '豪门', '甜宠']);
 
     // 目录与短剧列表
@@ -406,9 +410,45 @@ createApp({
       }
     }
 
+    function loadSearchHistory() {
+      const revision = searchHistoryRevision;
+      searchHistoryQueue = searchHistoryQueue.then(async () => {
+        const response = await fetch('/api/search-history');
+        if (!response.ok) throw new Error('搜索历史读取失败');
+        const data = await response.json();
+        if (revision === searchHistoryRevision && Array.isArray(data)) searchHistory.value = data;
+      }).catch(() => {});
+    }
+
+    function updateSearchHistory(action, keyword = '') {
+      if (action !== 'clear' && (!keyword || keyword.length > 200)) return;
+      const revision = ++searchHistoryRevision;
+      const rest = searchHistory.value.filter(item => item !== keyword);
+      searchHistory.value = action === 'clear' ? [] : action === 'add' ? [keyword, ...rest].slice(0, 10) : rest;
+      searchHistoryQueue = searchHistoryQueue.then(async () => {
+        const response = await fetch('/api/search-history', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, keyword })
+        });
+        if (!response.ok) throw new Error('搜索历史保存失败');
+        const data = await response.json();
+        if (revision === searchHistoryRevision && Array.isArray(data)) searchHistory.value = data;
+      }).catch(() => { notify('搜索历史保存失败'); });
+    }
+
+    function selectSearchHistory(keyword) {
+      searchKeyword.value = keyword;
+      handleSearch();
+    }
+
+    function onSearchFocusOut(event) {
+      if (!event.currentTarget.contains(event.relatedTarget)) showSearchHistory.value = false;
+    }
+
     async function handleSearch() {
       if (!searchKeyword.value.trim()) return;
       submittedKeyword = searchKeyword.value.trim();
+      showSearchHistory.value = false;
+      updateSearchHistory('add', submittedKeyword);
       currentTab.value = 'search';
       currentPage.value = 1;
       catalogError.value = null;
@@ -1334,6 +1374,7 @@ createApp({
     }
 
     onMounted(() => {
+      loadSearchHistory();
       loadCatalog();
       window.addEventListener('keydown', handleKeyDown);
       window.addEventListener('click', handleGlobalClick);
@@ -1381,7 +1422,7 @@ createApp({
       previewSeek, seekFromSlider, startScrubbing, finishScrubbing,
       viewMode,
       currentTab,
-      searchKeyword,
+      searchKeyword, searchHistory, showSearchHistory, updateSearchHistory, selectSearchHistory, onSearchFocusOut,
       hotTags,
       currentDramas,
       currentPage,
