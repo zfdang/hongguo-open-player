@@ -158,8 +158,7 @@ html.platform-mac .app-header {
 
 .nav-item.active {
   color: #fff;
-  background-color: var(--accent);
-  box-shadow: 0 2px 8px var(--accent-glow);
+  background-color: #91434d;
   font-weight: 600;
 }
 
