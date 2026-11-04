@@ -63,7 +63,7 @@
 
 ## 🍎 macOS 提示“应用已损坏，无法打开”
 
-部分用户在 macOS 上打开应用时可能遇到此提示（参见 [#59](https://github.com/zfdang/hongguo-open-player/issues/59)）。目前 macOS 安装包未使用 Apple 开发者证书签名和公证，系统的安全检查可能阻止其打开；但同样的提示也可能由下载损坏或文件被篡改引起。
+目前 macOS 安装包未使用 Apple 开发者证书签名和公证，系统的安全检查可能阻止其打开，并提示“应用已损坏”。同样的提示也可能由下载损坏或文件被篡改引起。
 
 请先从项目的 [GitHub Releases](https://github.com/zfdang/hongguo-open-player/releases) 重新下载安装包，选择适合自己 Mac 的版本，并将应用拖入“应用程序”文件夹。如果确认应用来自官方发布页面且未被篡改，仍然无法打开，可以打开“终端”并执行：
 
