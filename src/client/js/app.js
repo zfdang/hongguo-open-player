@@ -138,8 +138,8 @@ createApp({
       ];
       const likes = [0, 1, 20, 100, 500, 999, 7, 42];
       const seconds = Number.isFinite(duration.value) && duration.value > 0 ? Math.min(duration.value, 1800) : 1800;
-      return Array.from({ length: Math.ceil(seconds * 2) }, (_, i) => ({
-        time: i / 2, text: '[测试] ' + samples[i % samples.length], likes: likes[(i * 3) % likes.length]
+      return Array.from({ length: Math.ceil(seconds) }, (_, i) => ({
+        time: i, text: '[测试] ' + samples[i % samples.length], likes: likes[(i * 3) % likes.length]
       }));
     }
     function toggleDanmakuTest() {

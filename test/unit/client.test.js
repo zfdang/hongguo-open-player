@@ -1015,7 +1015,7 @@ test('danmaku engine receives episode comments and is replaced when switching ep
   state.duration.value = 8;
   state.toggleDanmakuTest();
   const withTests = instances.at(-1).options.comments;
-  assert.equal(withTests.length, 17);
+  assert.equal(withTests.length, 9);
   const rendered = withTests.slice(1).map(comment => comment.render());
   assert.ok(rendered.every(node => node.textContent.startsWith('[测试] ')));
   assert.ok(new Set(rendered.map(node => node.textContent.length)).size > 3);
