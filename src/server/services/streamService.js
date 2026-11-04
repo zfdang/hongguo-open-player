@@ -260,10 +260,10 @@ class StreamService {
   /**
    * 预加载下一集 (Prefetch)
    */
-  prefetch(vid, quality = 'auto', metadataOnly = false) {
+  prefetch(vid, quality = 'auto', metadataOnly = false, minValidityMs = 0) {
     if (!vid || !/^\d{1,30}$/.test(String(vid))) return;
     const key = `${vid}:${quality}`;
-    if (metadataOnly && this.plans.get(key)?.expires > Date.now()) return;
+    if (metadataOnly && this.plans.get(key)?.expires > Date.now() + minValidityMs) return;
     if (this.cache.has(key) || this.inFlight.has(key) || this.prefetchTimers.has(key)) return;
     // Range and HEAD probes must not create a timer for every browser request.
     if (this.prefetchTimers.size >= 2) {
@@ -277,7 +277,7 @@ class StreamService {
       if (metadataOnly) {
         const controller = new AbortController();
         this.planPrefetch = controller;
-        this.getStreamingPlan(String(vid), quality, controller.signal).then(() => {
+        this.getStreamingPlan(String(vid), quality, controller.signal, minValidityMs).then(() => {
           logger.info('StreamService', `[Prefetch] 成功预热下一集流分片元数据: vid=${vid}`);
         }).catch(error => {
           if (!controller.signal.aborted) logger.warn('StreamService', `[Prefetch] 下一集元数据预热失败: ${error.message}`);
@@ -309,10 +309,10 @@ class StreamService {
   /**
    * 处理 HTTP Range 播放请求 (边下边解边播的核心接口)
    */
-  async getStreamingPlan(vid, quality, signal) {
+  async getStreamingPlan(vid, quality, signal, minValidityMs = 0) {
     const key = `${vid}:${quality}`;
     const cached = this.plans.get(key);
-    if (cached?.expires > Date.now()) { this.plans.delete(key); this.plans.set(key, cached); return cached.plan; }
+    if (cached?.expires > Date.now() + minValidityMs) { this.plans.delete(key); this.plans.set(key, cached); return cached.plan; }
     const t0 = Date.now();
     logger.info('StreamService', `开始构建流式分片播放计划: vid=${vid}, quality=${quality}`);
     const info = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, signal });

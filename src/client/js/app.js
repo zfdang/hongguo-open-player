@@ -72,6 +72,7 @@ createApp({
     let progressTimer = null;
     let pendingResumeSec = 0;
     let progressReady = false;
+    let lastNearEndPrefetch = 0;
     let theaterRequest = 0;
     let catalogScrollTop = 0;
     let fullscreenExitAt = 0;
@@ -865,6 +866,7 @@ createApp({
     // ================= 沉浸式剧场与播放逻辑 =================
 
     function resetPlayback() {
+      lastNearEndPrefetch = 0;
       stopDanmakuAnimation();
       progressReady = false;
       pendingResumeSec = 0;
@@ -1167,6 +1169,15 @@ createApp({
       if (event && event.target !== videoEl.value) return;
       if (videoEl.value) {
         currentTime.value = videoEl.value.currentTime || 0;
+        const rate = Number(videoEl.value.playbackRate) || 1;
+        const remaining = (duration.value - currentTime.value) / rate;
+        if (isPlaying.value && Number.isFinite(remaining) && remaining > 0 && remaining <= 45 && Date.now() - lastNearEndPrefetch >= 20000) {
+          const next = activeEpisodes.value.find(ep => ep.vid_index === activeEpisodeIndex.value + 1);
+          if (next?.vid) {
+            lastNearEndPrefetch = Date.now();
+            fetch(`/api/prefetch/${encodeURIComponent(next.vid)}`, { method: 'POST' }).catch(() => {});
+          }
+        }
         // 计算缓冲进度
         if (videoEl.value.buffered.length > 0 && duration.value > 0) {
           const bufferedEnd = videoEl.value.buffered.end(videoEl.value.buffered.length - 1);

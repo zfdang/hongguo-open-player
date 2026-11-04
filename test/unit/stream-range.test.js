@@ -87,3 +87,25 @@ test('getStreamingPlan falls back to next candidate when first candidate returns
     rangeMedia.prepareRangeMedia = originalPrepare;
   }
 });
+
+test('near-end prefetch can refresh a plan that expires before playback', async () => {
+  const service = new StreamService();
+  const appSource = require('../../src/server/native/app-source');
+  const rangeMedia = require('../../src/server/services/rangeMedia');
+  const originalFetch = appSource.fetchAppPlayUrl, originalPrepare = rangeMedia.prepareRangeMedia;
+  const oldPlan = { bytes: 5 }, newPlan = { bytes: 5 };
+  let calls = 0;
+  service.plans.set('123:auto', { plan: oldPlan, expires: Date.now() + 30000 });
+  appSource.fetchAppPlayUrl = async () => { calls++; return { url: 'https://example.com/video' }; };
+  rangeMedia.prepareRangeMedia = async () => newPlan;
+  try {
+    assert.equal(await service.getStreamingPlan('123', 'auto', new AbortController().signal), oldPlan);
+    assert.equal(await service.getStreamingPlan('123', 'auto', new AbortController().signal, 45000), newPlan);
+    assert.equal(calls, 1);
+    assert.equal(await service.getStreamingPlan('123', 'auto', new AbortController().signal, 45000), newPlan);
+    assert.equal(calls, 1);
+  } finally {
+    appSource.fetchAppPlayUrl = originalFetch;
+    rangeMedia.prepareRangeMedia = originalPrepare;
+  }
+});

@@ -170,6 +170,13 @@ app.get('/api/play/:vid', async (req, res) => {
  * 5. 本地流媒体解密播放代理 (核心)
  * 支持 Range 请求，边下边解边播，支持预加载
  */
+app.post('/api/prefetch/:vid', (req, res) => {
+  const { vid } = req.params;
+  if (!/^\d{1,30}$/.test(vid)) return res.status(400).json({ error: '无效的分集编号' });
+  streamService.prefetch(vid, 'auto', true, 45000);
+  res.sendStatus(202);
+});
+
 app.get('/api/stream/:vid', (req, res) => {
   const { vid } = req.params;
   streamService.handleStream(req, res, vid);
