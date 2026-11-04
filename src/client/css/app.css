@@ -640,8 +640,8 @@ html.platform-mac .app-header {
 
 .playing-ep-badge {
   font-size: 12px;
-  background-color: rgba(255, 51, 85, 0.15);
-  color: var(--accent);
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--text-sub);
   padding: 2px 8px;
   border-radius: 4px;
   font-weight: 600;
@@ -887,8 +887,8 @@ html.platform-mac .app-header {
   top: 10px;
   left: 0;
   height: 4px;
-  background: linear-gradient(90deg, #ff4772 0%, #ff6b8b 100%);
-  box-shadow: 0 0 6px rgba(255, 71, 114, 0.35);
+  background: linear-gradient(90deg, #bc7184 0%, #d396a4 100%);
+  box-shadow: 0 0 4px rgba(188, 113, 132, 0.2);
   border-radius: 2px;
   pointer-events: none;
   transition: width 0.1s linear, height 0.15s ease, top 0.15s ease;
@@ -899,7 +899,7 @@ html.platform-mac .app-header {
   top: 9px;
   height: 6px;
   border-radius: 3px;
-  box-shadow: 0 0 8px rgba(255, 71, 114, 0.55);
+  box-shadow: 0 0 6px rgba(188, 113, 132, 0.3);
 }
 
 .progress-bar-thumb {
@@ -911,7 +911,7 @@ html.platform-mac .app-header {
   border-radius: 50%;
   transform: translate(-50%, -50%) scale(0.6);
   opacity: 0;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45), 0 0 6px rgba(255, 71, 114, 0.45);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45), 0 0 4px rgba(188, 113, 132, 0.25);
   pointer-events: none;
   z-index: 1;
   transition: opacity 0.15s ease, transform 0.15s ease;
@@ -990,7 +990,7 @@ html.platform-mac .app-header {
 
 .volume-slider {
   width: 70px;
-  accent-color: var(--accent);
+  accent-color: #c88898;
   cursor: pointer;
 }
 
@@ -2623,7 +2623,7 @@ html.platform-win .app-header { padding-right: 160px; }
 
 .danmaku-control { position: relative; flex: none; }
 .danmaku-button { background: transparent; border: 1px solid var(--border-color); border-radius: 6px; padding: 5px 9px; color: var(--text-dim); cursor: pointer; white-space: nowrap; }
-.danmaku-button.active { color: var(--accent); border-color: var(--accent); }
+.danmaku-button.active { border-color: var(--accent); }
 .danmaku-panel { position: absolute; bottom: calc(100% + 14px); right: 0; width: 250px; padding: 16px; border: 1px solid var(--border-color); border-radius: 10px; background: #1b1d27; box-shadow: 0 8px 28px #0009; z-index: 20; color: var(--text-main); }
 .danmaku-panel-header, .danmaku-panel-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .danmaku-panel-header { margin-bottom: 16px; }
