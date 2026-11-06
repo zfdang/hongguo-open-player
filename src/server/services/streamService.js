@@ -304,7 +304,7 @@ class StreamService {
   /**
    * 预加载下一集 (Prefetch)
    */
-  prefetch(vid, quality = 'auto', metadataOnly = false, minValidityMs = 0) {
+  prefetch(vid, quality = 'auto', metadataOnly = false, minValidityMs = 0, nextVids = []) {
     if (!vid || !/^\d{1,30}$/.test(String(vid))) return;
     const key = `${vid}:${quality}`;
     if (metadataOnly && this.plans.get(key)?.expires > Date.now() + minValidityMs) return;
@@ -321,7 +321,7 @@ class StreamService {
       if (metadataOnly) {
         const controller = new AbortController();
         this.planPrefetch = controller;
-        this.getStreamingPlan(String(vid), quality, controller.signal, minValidityMs).then(() => {
+        this.getStreamingPlan(String(vid), quality, controller.signal, minValidityMs, nextVids).then(() => {
           logger.info('StreamService', `[Prefetch] 成功预热下一集流分片元数据: vid=${vid}`);
         }).catch(error => {
           if (!controller.signal.aborted) logger.warn('StreamService', `[Prefetch] 下一集元数据预热失败: ${error.message}`);
@@ -501,7 +501,8 @@ class StreamService {
       if (req.method === 'HEAD') { res.end(); return; }
       await pipeline(Readable.from(plan.read(start, end, controller.signal), { objectMode: false, highWaterMark: 64 * 1024 }), res);
       logger.info('StreamService', `流式分片传输完成: vid=${vid}, 区间=${start}-${end}/${total}, 耗时=${Date.now() - t0}ms`);
-      this.prefetch(req.query?.next_vid, quality, true);
+      const followVids = nextVids.filter(v => v !== String(req.query?.next_vid) && v !== String(vid));
+      this.prefetch(req.query?.next_vid, quality, true, 0, followVids);
     } catch (error) {
       const isClientAbort = controller.signal.aborted ||
         error.name === 'AbortError' ||
@@ -567,7 +568,15 @@ class StreamService {
         res.removeListener?.('close', disconnected);
       }
       if (res.destroyed) return;
-      if (req.method === 'GET' && !res.destroyed) this.prefetch(req.query?.next_vid, req.query?.quality || 'auto');
+      const nextVids = [];
+      if (req.query?.next_vids) {
+        for (const v of req.query.next_vids.split(',')) {
+          const clean = v.trim();
+          if (/^\d{1,30}$/.test(clean) && !nextVids.includes(clean)) nextVids.push(clean);
+        }
+      }
+      const followVids = nextVids.filter(v => v !== String(req.query?.next_vid) && v !== String(vid));
+      if (req.method === 'GET' && !res.destroyed) this.prefetch(req.query?.next_vid, req.query?.quality || 'auto', false, 0, followVids);
       const total = buffer.length;
       const range = req.headers.range;
 

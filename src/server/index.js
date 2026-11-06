@@ -173,7 +173,14 @@ app.get('/api/play/:vid', async (req, res) => {
 app.post('/api/prefetch/:vid', (req, res) => {
   const { vid } = req.params;
   if (!/^\d{1,30}$/.test(vid)) return res.status(400).json({ error: '无效的分集编号' });
-  streamService.prefetch(vid, 'auto', true, 45000);
+  const nextVids = [];
+  if (req.query?.next_vids) {
+    for (const v of req.query.next_vids.split(',')) {
+      const clean = v.trim();
+      if (/^\d{1,30}$/.test(clean) && !nextVids.includes(clean)) nextVids.push(clean);
+    }
+  }
+  streamService.prefetch(vid, 'auto', true, 45000, nextVids);
   res.sendStatus(202);
 });
 

@@ -1095,11 +1095,20 @@ test('late preference loading preserves changes made by the user', async () => {
   assert.equal(updates[0].playbackRate, '2.0');
 });
 
-test('prefetch is requested near the end using remaining playback time', async () => {
+test('prefetch is requested near the end using remaining playback time and includes next_vids', async () => {
   const calls = [];
   const state = client(async (url, options) => {
     calls.push([url, options]);
-    if (url.startsWith('/api/series/')) return response({ series_id: '123', episodes: [{ vid: '111', vid_index: 1 }, { vid: '222', vid_index: 2 }] });
+    if (url.startsWith('/api/series/')) return response({
+      series_id: '123',
+      episodes: [
+        { vid: '111', vid_index: 1 },
+        { vid: '222', vid_index: 2 },
+        { vid: '333', vid_index: 3 },
+        { vid: '444', vid_index: 4 },
+        { vid: '555', vid_index: 5 }
+      ]
+    });
     return response({ success: true, items: [] });
   });
   await state.openTheater({ series_id: '123' });
@@ -1107,10 +1116,10 @@ test('prefetch is requested near the end using remaining playback time', async (
   state.duration.value = 200;
   state.isPlaying.value = true;
   state.onTimeUpdate();
-  assert.equal(calls.filter(([url]) => url === '/api/prefetch/222').length, 0);
+  assert.equal(calls.filter(([url]) => url.startsWith('/api/prefetch/222')).length, 0);
   state.videoEl.value.currentTime = 112;
   state.onTimeUpdate(); state.onTimeUpdate();
-  assert.equal(calls.filter(([url, options]) => url === '/api/prefetch/222' && options.method === 'POST').length, 1);
+  assert.equal(calls.filter(([url, options]) => url === '/api/prefetch/222?next_vids=333%2C444%2C555' && options.method === 'POST').length, 1);
 });
 
 test('danmaku settings close on outside pointer interactions but remain open inside', () => {
@@ -1140,7 +1149,10 @@ test('currentStreamUrl includes next_vid and next_vids from upcoming episodes', 
     { vid: '104', vid_index: 4 }
   ];
   state.activeEpisodeIndex.value = 1;
-  assert.equal(state.currentStreamUrl.value, '/api/stream/101?next_vid=102&next_vids=102%2C103');
+  assert.equal(state.currentStreamUrl.value, '/api/stream/101?next_vid=102&next_vids=102%2C103%2C104');
+
+  state.activeEpisodeIndex.value = 2;
+  assert.equal(state.currentStreamUrl.value, '/api/stream/102?next_vid=103&next_vids=103%2C104');
 
   state.activeEpisodeIndex.value = 3;
   assert.equal(state.currentStreamUrl.value, '/api/stream/103?next_vid=104');

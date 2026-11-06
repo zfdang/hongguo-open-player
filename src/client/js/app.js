@@ -372,7 +372,8 @@ createApp({
       // 计算后续分集便于服务端批量拉取与无感预加载
       const nextEp1 = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value + 1);
       const nextEp2 = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value + 2);
-      const nextList = [nextEp1?.vid, nextEp2?.vid].filter(Boolean);
+      const nextEp3 = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value + 3);
+      const nextList = [nextEp1?.vid, nextEp2?.vid, nextEp3?.vid].filter(Boolean);
       const params = [];
       if (nextEp1?.vid) params.push(`next_vid=${encodeURIComponent(nextEp1.vid)}`);
       if (nextList.length > 1) params.push(`next_vids=${encodeURIComponent(nextList.join(','))}`);
@@ -1182,7 +1183,12 @@ createApp({
           const next = activeEpisodes.value.find(ep => ep.vid_index === activeEpisodeIndex.value + 1);
           if (next?.vid) {
             lastNearEndPrefetch = Date.now();
-            fetch(`/api/prefetch/${encodeURIComponent(next.vid)}`, { method: 'POST' }).catch(() => {});
+            const next2 = activeEpisodes.value.find(ep => ep.vid_index === activeEpisodeIndex.value + 2);
+            const next3 = activeEpisodes.value.find(ep => ep.vid_index === activeEpisodeIndex.value + 3);
+            const next4 = activeEpisodes.value.find(ep => ep.vid_index === activeEpisodeIndex.value + 4);
+            const followVids = [next2?.vid, next3?.vid, next4?.vid].filter(Boolean);
+            const query = followVids.length ? `?next_vids=${encodeURIComponent(followVids.join(','))}` : '';
+            fetch(`/api/prefetch/${encodeURIComponent(next.vid)}${query}`, { method: 'POST' }).catch(() => {});
           }
         }
         // 计算缓冲进度

@@ -287,3 +287,50 @@ test('sortVariantsByCdnPriority preserves codec and resolution tier precedence w
   assert.equal(sorted[2], v3);
   assert.equal(sorted[3], v4);
 });
+
+test('prefetch forwards nextVids to getStreamingPlan and handleStream passes followVids', async () => {
+  const service = new StreamService();
+  const prefetchCalls = [];
+  const planCalls = [];
+
+  service.getStreamingPlan = async (vid, quality, signal, minValidityMs, nextVids) => {
+    planCalls.push({ vid, quality, minValidityMs, nextVids });
+    return {
+      size: 10,
+      bytes: 10,
+      read: async function* () { yield Buffer.from('1234567890'); }
+    };
+  };
+
+  const originalSetTimeout = global.setTimeout;
+  try {
+    global.setTimeout = fn => {
+      fn();
+      return { unref() {} };
+    };
+
+    service.prefetch('102', 'auto', true, 45000, ['103', '104']);
+    assert.equal(planCalls.length, 1);
+    assert.deepEqual(planCalls[0], {
+      vid: '102',
+      quality: 'auto',
+      minValidityMs: 45000,
+      nextVids: ['103', '104']
+    });
+
+    service.prefetch = (...args) => prefetchCalls.push(args);
+
+    const { Writable } = require('node:stream');
+    const res = new Writable({ write(chunk, encoding, cb) { cb(); } });
+    res.writeHead = (code, headers) => { res.status = code; res.headers = headers; };
+    await service.handleStream({
+      headers: { range: 'bytes=0-4' },
+      query: { next_vid: '102', next_vids: '102,103,104' }
+    }, res, '101');
+
+    assert.equal(prefetchCalls.length, 1);
+    assert.deepEqual(prefetchCalls[0], ['102', 'auto', true, 0, ['103', '104']]);
+  } finally {
+    global.setTimeout = originalSetTimeout;
+  }
+});

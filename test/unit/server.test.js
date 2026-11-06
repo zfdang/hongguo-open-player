@@ -177,5 +177,9 @@ test('near-end prefetch endpoint requires a session and validates the episode', 
   const options = { method: 'POST', headers: { Cookie: cookie } };
   assert.equal((await fetch(`${base}/api/prefetch/invalid`, options)).status, 400);
   assert.equal((await fetch(`${base}/api/prefetch/123`, options)).status, 202);
-  assert.deepEqual(calls, [['123', 'auto', true, 45000]]);
+  assert.equal((await fetch(`${base}/api/prefetch/124?next_vids=125,126`, options)).status, 202);
+  assert.deepEqual(calls, [
+    ['123', 'auto', true, 45000, []],
+    ['124', 'auto', true, 45000, ['125', '126']]
+  ]);
 });
