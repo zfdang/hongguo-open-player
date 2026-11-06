@@ -168,3 +168,86 @@ test('stream admission limits the number of waiting requests', async () => {
   assert.deepEqual(await Promise.all(waiting), [false, false, false, false, false, false]);
   assert.equal(service.waitingStreams.length, 0);
 });
+
+test('consecutive rapid client disconnections evict cached streaming plan to prevent retry deadlocks', async () => {
+  const { Writable } = require('node:stream');
+  const service = new StreamService();
+  const mockPlan = {
+    size: 100,
+    bytes: 100,
+    read: async function* () {
+      yield Buffer.from('chunk1');
+      throw Object.assign(new Error('premature close'), { code: 'ERR_STREAM_PREMATURE_CLOSE' });
+    }
+  };
+  service.plans.set('vid-rapid:auto', { plan: mockPlan, expires: Date.now() + 90000 });
+
+  // First abort (<300ms)
+  const res1 = new Writable({ write(chunk, enc, cb) { cb(); } });
+  res1.writeHead = () => {};
+  await service.handleStream({ headers: { range: 'bytes=0-50' } }, res1, 'vid-rapid');
+  assert.ok(service.plans.has('vid-rapid:auto'), 'Single abort should keep plan');
+
+  // Second abort within 3 seconds (<300ms)
+  const res2 = new Writable({ write(chunk, enc, cb) { cb(); } });
+  res2.writeHead = () => {};
+  await service.handleStream({ headers: { range: 'bytes=0-50' } }, res2, 'vid-rapid');
+  assert.ok(!service.plans.has('vid-rapid:auto'), 'Consecutive rapid aborts should evict plan');
+});
+
+test('refresh=1 query clears cached streaming plan and app entry cache', async () => {
+  const service = new StreamService();
+  const appSource = require('../../src/server/native/app-source');
+  let clearedVid = null;
+  const originalClear = appSource.clearEntryCache;
+  appSource.clearEntryCache = (vid) => { clearedVid = vid; };
+
+  try {
+    service.plans.set('vid-refresh:auto', { plan: { bytes: 100 }, expires: Date.now() + 90000 });
+    service.cache.set('vid-refresh:auto', { buffer: Buffer.from('cached') });
+
+    let planCalled = false;
+    service.getStreamingPlan = async () => {
+      planCalled = true;
+      return { size: 10, bytes: 10, read: async function* () { yield Buffer.from('0123456789'); } };
+    };
+
+    const res = { writeHead(code, headers) { this.status = code; }, end() { this.ended = true; } };
+    await service.handleStream({ headers: { range: 'bytes=0-4' }, query: { refresh: '1' } }, res, 'vid-refresh');
+
+    assert.equal(service.plans.has('vid-refresh:auto'), false);
+    assert.equal(clearedVid, 'vid-refresh');
+    assert.equal(planCalled, true);
+  } finally {
+    appSource.clearEntryCache = originalClear;
+  }
+});
+
+test('getStreamingPlan deprioritizes throttled v9-reading-video CDN variant', async () => {
+  const service = new StreamService();
+  const appSource = require('../../src/server/native/app-source');
+  const rangeMedia = require('../../src/server/services/rangeMedia');
+  const originalFetch = appSource.fetchAppPlayUrl;
+  const originalPrepare = rangeMedia.prepareRangeMedia;
+
+  let testedVariant = null;
+  appSource.fetchAppPlayUrl = async () => ({
+    variants: [
+      { url: 'http://v9-reading-video.fqnovelvod.com/video1.mp4' },
+      { url: 'http://v3-reading-video.douyinvod.com/video2.mp4' },
+      { url: 'http://v9-reading-video-cold.fqnovelvod.com/video3.mp4' },
+    ]
+  });
+  rangeMedia.prepareRangeMedia = async (variant) => {
+    testedVariant = variant;
+    return { size: 100, bytes: 100, read: async function* () {} };
+  };
+
+  try {
+    await service.getStreamingPlan('vid-cdn-priority', 'auto', new AbortController().signal);
+    assert.equal(testedVariant.url, 'http://v3-reading-video.douyinvod.com/video2.mp4');
+  } finally {
+    appSource.fetchAppPlayUrl = originalFetch;
+    rangeMedia.prepareRangeMedia = originalPrepare;
+  }
+});

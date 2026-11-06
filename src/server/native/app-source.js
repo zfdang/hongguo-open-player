@@ -318,36 +318,14 @@ async function requestJson(url, options, deadline, signal) {
     throw Object.assign(new Error('App 片源跳转次数过多'), { code: 'SECURITY_BLOCKED' });
 }
 
-async function fetchAppPlayUrl(vid, options = {}) {
-    const requestedQuality = normalizeDownloadQuality(options.quality);
-    const allowLowerQuality = options.allowLowerQuality === true && requestedQuality !== 'auto';
-    vid = String(vid || '');
-    if (!/^\d{1,30}$/.test(vid)) throw new Error('分集编号无效');
-    const deadline = Date.now() + 12000;
-    const timeoutSignal = AbortSignal.timeout(12000);
-    const signal = options.signal ? AbortSignal.any([timeoutSignal, options.signal]) : timeoutSignal;
-    const payload = JSON.stringify({
-        biz_param: { detail_page_version: 0, device_level: 3, disable_digg_stat: false, need_all_video_definition: true, need_mp4_align: false, use_os_player: false, use_server_dns: false, video_platform: 1024 },
-        mixed_video_id_map: { '1004': [vid] },
-    });
-    const device = await getPlaybackDevice(requestJson, signal);
-    let signed = playbackRequest(payload, device);
-    let response;
-    try {
-        response = await requestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
-    } catch (err) {
-        signal.throwIfAborted();
-        if (err.code === 'EMPTY_RESPONSE' && typeof getPlaybackDevice.reset === 'function') {
-            logger.warn('AppSource', 'App 接口返回空响应，尝试更新播放设备并重试...');
-            getPlaybackDevice.reset(device);
-            signed = playbackRequest(payload, await getPlaybackDevice(requestJson, signal));
-            response = await requestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
-        } else {
-            throw err;
-        }
-    }
-    if (Number(response.Code || response.code || 0) !== 0) throw Object.assign(new Error('App 接口暂未提供本集播放信息'), { code: 'BUSINESS_REJECTED' });
-    const entry = response.data?.[vid];
+const entryCache = new Map();
+
+function clearEntryCache(vid) {
+    if (vid) entryCache.delete(String(vid));
+    else entryCache.clear();
+}
+
+async function parseEntryPlayInfo(vid, entry, requestedQuality, allowLowerQuality, deadline, signal) {
     const model = typeof entry?.video_model === 'string' ? jsonBody(entry.video_model) : entry?.video_model;
     if (!model) throw Object.assign(new Error('App 接口未返回所选分集，已停止取址'), { code: entry?.video_model ? 'INVALID_RESPONSE' : 'MISSING_MODEL' });
     const inline = Array.isArray(model.video_list) && model.video_list.length > 0;
@@ -420,4 +398,76 @@ async function fetchAppPlayUrl(vid, options = {}) {
         : Object.assign(new Error('本集片源地址或密钥无法解析'), { code: 'INVALID_RESPONSE' });
 }
 
-module.exports = { fetchAppPlayUrl, signedSearchRequest, signedMetadataRequest, parseSearchInteger, requestJson, SEARCH_API, SEARCH_UA };
+async function fetchAppPlayUrl(vid, options = {}) {
+    const requestedQuality = normalizeDownloadQuality(options.quality);
+    const allowLowerQuality = options.allowLowerQuality === true && requestedQuality !== 'auto';
+    vid = String(vid || '');
+    if (!/^\d{1,30}$/.test(vid)) throw new Error('分集编号无效');
+    const deadline = Date.now() + 12000;
+    const timeoutSignal = AbortSignal.timeout(12000);
+    const signal = options.signal ? AbortSignal.any([timeoutSignal, options.signal]) : timeoutSignal;
+
+    if (!options.refresh && entryCache.has(vid)) {
+        const cached = entryCache.get(vid);
+        if (cached?.expires > Date.now()) {
+            try {
+                return await parseEntryPlayInfo(vid, cached.entry, requestedQuality, allowLowerQuality, deadline, signal);
+            } catch (_) {
+                entryCache.delete(vid);
+            }
+        } else {
+            entryCache.delete(vid);
+        }
+    }
+
+    const batch = [vid];
+    const extra = Array.isArray(options.nextVids) ? options.nextVids : options.nextVid ? [options.nextVid] : [];
+    for (const next of extra) {
+        const nVid = String(next || '');
+        if (/^\d{1,30}$/.test(nVid) && !batch.includes(nVid)) {
+            batch.push(nVid);
+            if (batch.length >= 4) break;
+        }
+    }
+
+    const payload = JSON.stringify({
+        biz_param: { detail_page_version: 0, device_level: 3, disable_digg_stat: false, need_all_video_definition: true, need_mp4_align: false, use_os_player: false, use_server_dns: false, video_platform: 1024 },
+        mixed_video_id_map: { '1004': batch },
+    });
+    const execRequestJson = (...args) => (module.exports.requestJson || requestJson)(...args);
+    const device = await getPlaybackDevice(execRequestJson, signal);
+    let signed = playbackRequest(payload, device);
+    let response;
+    try {
+        response = await execRequestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
+    } catch (err) {
+        signal.throwIfAborted();
+        if (err.code === 'EMPTY_RESPONSE' && typeof getPlaybackDevice.reset === 'function') {
+            logger.warn('AppSource', 'App 接口返回空响应，尝试更新播放设备并重试...');
+            getPlaybackDevice.reset(device);
+            signed = playbackRequest(payload, await getPlaybackDevice(execRequestJson, signal));
+            response = await execRequestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
+        } else {
+            throw err;
+        }
+    }
+    if (Number(response.Code || response.code || 0) !== 0) throw Object.assign(new Error('App 接口暂未提供本集播放信息'), { code: 'BUSINESS_REJECTED' });
+
+    if (response.data && typeof response.data === 'object') {
+        const now = Date.now();
+        for (const [id, entry] of Object.entries(response.data)) {
+            if (entry && (entry.video_model || entry.fallback_api)) {
+                entryCache.set(id, { entry, expires: now + 180000 });
+            }
+        }
+        while (entryCache.size > 64) {
+            entryCache.delete(entryCache.keys().next().value);
+        }
+    }
+
+    const currentEntry = response.data?.[vid] || entryCache.get(vid)?.entry;
+    if (!currentEntry) throw Object.assign(new Error('App 接口未返回所选分集，已停止取址'), { code: 'MISSING_MODEL' });
+    return await parseEntryPlayInfo(vid, currentEntry, requestedQuality, allowLowerQuality, deadline, signal);
+}
+
+module.exports = { fetchAppPlayUrl, clearEntryCache, signedSearchRequest, signedMetadataRequest, parseSearchInteger, requestJson, SEARCH_API, SEARCH_UA };

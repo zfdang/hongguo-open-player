@@ -363,15 +363,21 @@ createApp({
 
     // 当前选集分组
     const currentGroup = ref({ start: 1, end: 30 });
+    const streamRefreshTick = ref(0);
 
     // 当前播放直链 (通过本地边下边解代理)
     const currentStreamUrl = computed(() => {
       const ep = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value);
       if (!ep || !ep.vid) return '';
-      // 计算下一集的 vid 便于代理服务无感预加载
-      const nextEp = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value + 1);
-      const nextParam = nextEp?.vid ? `?next_vid=${nextEp.vid}` : '';
-      return `/api/stream/${ep.vid}${nextParam}`;
+      // 计算后续分集便于服务端批量拉取与无感预加载
+      const nextEp1 = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value + 1);
+      const nextEp2 = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value + 2);
+      const nextList = [nextEp1?.vid, nextEp2?.vid].filter(Boolean);
+      const params = [];
+      if (nextEp1?.vid) params.push(`next_vid=${encodeURIComponent(nextEp1.vid)}`);
+      if (nextList.length > 1) params.push(`next_vids=${encodeURIComponent(nextList.join(','))}`);
+      if (streamRefreshTick.value > 0) params.push('refresh=1');
+      return `/api/stream/${ep.vid}${params.length ? '?' + params.join('&') : ''}`;
     });
 
     const playedPercent = computed(() => {
@@ -968,6 +974,7 @@ createApp({
       saveProgressNow();
       resetPlayback();
       videoErrorMessage.value = '';
+      streamRefreshTick.value = 0;
       isBuffering.value = true;
       activeEpisodeIndex.value = ep.vid_index;
       loadDanmaku();
@@ -1228,6 +1235,8 @@ createApp({
             }
           }
         }
+      } else if (code === 2) {
+        videoErrorMessage.value = '视频流读取中断（网络或取流异常）；请点击“重试本集”或切换分集';
       } else {
         videoErrorMessage.value = '视频加载失败，请检查网络后重试';
       }
@@ -1235,6 +1244,7 @@ createApp({
 
     function retryCurrentEpisode() {
       videoErrorMessage.value = '';
+      streamRefreshTick.value++;
       if (videoEl.value) {
         videoEl.value.load();
         videoEl.value.play().catch(console.error);

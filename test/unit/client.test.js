@@ -1130,3 +1130,50 @@ test('danmaku settings close on outside pointer interactions but remain open ins
   listeners.pointerdown({ target: { tagName: 'BUTTON', closest: () => null } });
   assert.equal(state.showDanmakuSettings.value, false);
 });
+
+test('currentStreamUrl includes next_vid and next_vids from upcoming episodes', async () => {
+  const state = client(async () => response({}));
+  state.activeEpisodes.value = [
+    { vid: '101', vid_index: 1 },
+    { vid: '102', vid_index: 2 },
+    { vid: '103', vid_index: 3 },
+    { vid: '104', vid_index: 4 }
+  ];
+  state.activeEpisodeIndex.value = 1;
+  assert.equal(state.currentStreamUrl.value, '/api/stream/101?next_vid=102&next_vids=102%2C103');
+
+  state.activeEpisodeIndex.value = 3;
+  assert.equal(state.currentStreamUrl.value, '/api/stream/103?next_vid=104');
+
+  state.activeEpisodeIndex.value = 4;
+  assert.equal(state.currentStreamUrl.value, '/api/stream/104');
+});
+
+test('retryCurrentEpisode increments streamRefreshTick and attaches refresh=1, switchEpisode resets it', async () => {
+  const state = client(async () => response({}));
+  state.activeEpisodes.value = [
+    { vid: '101', vid_index: 1 },
+    { vid: '102', vid_index: 2 }
+  ];
+  state.activeEpisodeIndex.value = 1;
+  assert.equal(state.currentStreamUrl.value, '/api/stream/101?next_vid=102');
+
+  state.retryCurrentEpisode();
+  assert.match(state.currentStreamUrl.value, /refresh=1/);
+
+  state.switchEpisode(state.activeEpisodes.value[1]);
+  assert.equal(state.currentStreamUrl.value, '/api/stream/102');
+  assert.ok(!state.currentStreamUrl.value.includes('refresh=1'));
+});
+
+test('video error handler provides specific guidance for MediaError code 2 stream read failures', () => {
+  const state = client(async () => response({}));
+  state.videoEl.value = {
+    error: {
+      code: 2,
+      message: 'MEDIA_ELEMENT_ERROR: Format error'
+    }
+  };
+  state.onVideoError();
+  assert.equal(state.videoErrorMessage.value, '视频流读取中断（网络或取流异常）；请点击“重试本集”或切换分集');
+});
