@@ -28,6 +28,7 @@ class StreamService {
     this.waitingStreams = [];
     this.streamControllers = new Set();
     this.quickAborts = new Map();
+    this.consumedRefreshes = new Map();
   }
 
   /**
@@ -105,16 +106,54 @@ class StreamService {
   }
 
   /**
+   * CDN 智能排序：在保持编码（H.264/HEVC）与画质层级的前提下，在同一层级内将受限速的 v9-reading-video 节点降权
+   */
+  sortVariantsByCdnPriority(variants) {
+    if (!Array.isArray(variants) || variants.length <= 1) return variants ? variants.slice() : [];
+
+    const tierKey = (v) => {
+      const codec = String(v?.codec || '').toLowerCase();
+      const quality = String(v?.quality || '').toLowerCase();
+      const width = Number(v?.width || 0);
+      const height = Number(v?.height || 0);
+      return `${codec}:${quality}:${width}x${height}`;
+    };
+
+    const tierOrder = [];
+    const tierMap = new Map();
+    for (const v of variants) {
+      const key = tierKey(v);
+      if (!tierMap.has(key)) {
+        tierMap.set(key, []);
+        tierOrder.push(key);
+      }
+      tierMap.get(key).push(v);
+    }
+
+    const result = [];
+    for (const key of tierOrder) {
+      const group = tierMap.get(key);
+      const normal = [];
+      const throttled = [];
+      for (const v of group) {
+        if (/v9-reading-video/i.test(v?.url || '')) {
+          throttled.push(v);
+        } else {
+          normal.push(v);
+        }
+      }
+      result.push(...normal, ...throttled);
+    }
+    return result;
+  }
+
+  /**
    * 智能下载：排序边缘 CDN 节点并支持 1.5s 备用节点竞速，解决个别主域名 (如 v9-reading-video) 限速 30 秒卡顿问题
    */
   async downloadFastestMedia(variants, defaultVariant, timeoutMs = 25000, signal) {
     const list = Array.isArray(variants) && variants.length > 0 ? variants : [defaultVariant];
-    // 智能排序：优先排除受限速的主节点，优先选择边缘高速 CDN
-    const sorted = [...list].sort((a, b) => {
-      const aBad = a.url.includes('v9-reading-video') ? 1 : 0;
-      const bBad = b.url.includes('v9-reading-video') ? 1 : 0;
-      return aBad - bBad;
-    });
+    // 智能排序：在保持编码与画质层级的前提下，优先排除同层级受限速的节点
+    const sorted = this.sortVariantsByCdnPriority(list);
 
     const abortControllers = sorted.map(() => new AbortController());
 
@@ -259,6 +298,7 @@ class StreamService {
     this.cache.clear();
     this.plans.clear();
     this.quickAborts.clear();
+    this.consumedRefreshes.clear();
   }
 
   /**
@@ -323,12 +363,8 @@ class StreamService {
     let lastError;
     let hasRangeUnsupported = false;
     const rawVariants = info.variants?.length ? info.variants : [info];
-    // 智能排序：优先排除受限速的主节点 (如 v9-reading-video)，优先选择边缘高速 CDN
-    const variants = [...rawVariants].sort((a, b) => {
-      const aBad = a.url.includes('v9-reading-video') ? 1 : 0;
-      const bBad = b.url.includes('v9-reading-video') ? 1 : 0;
-      return aBad - bBad;
-    });
+    // 智能排序：在保持编码与画质层级的前提下，优先排除同层级受限速的节点 (如 v9-reading-video)
+    const variants = this.sortVariantsByCdnPriority(rawVariants);
     for (const variant of variants) {
       signal.throwIfAborted();
       try {
@@ -403,17 +439,25 @@ class StreamService {
     const disconnected = () => { if (!res.writableEnded) controller.abort(new Error('Playback disconnected')); };
     res.once?.('close', disconnected);
     const t0 = Date.now();
-    const isRefresh = req.query?.refresh === '1' || req.query?.refresh === 'true';
+    const refreshToken = req.query?.refresh ? String(req.query.refresh).trim() : '';
+    const isRefresh = Boolean(refreshToken && refreshToken !== '0' && refreshToken !== 'false');
     const quality = normalizeDownloadQuality(req.query?.quality || 'auto');
     const planKey = `${vid}:${quality}`;
     if (isRefresh) {
-      this.plans.delete(planKey);
-      this.plans.delete(String(vid));
-      this.cache.delete(planKey);
-      this.cache.delete(String(vid));
-      this.quickAborts.delete(planKey);
-      appSource.clearEntryCache?.(vid);
-      logger.info('StreamService', `收到刷新指令，已清空播放计划与模型缓存: vid=${vid}`);
+      const refreshKey = `${vid}:${quality}:${refreshToken}`;
+      if (!this.consumedRefreshes.has(refreshKey)) {
+        this.consumedRefreshes.set(refreshKey, Date.now());
+        this.plans.delete(planKey);
+        this.plans.delete(String(vid));
+        this.cache.delete(planKey);
+        this.cache.delete(String(vid));
+        this.quickAborts.delete(planKey);
+        appSource.clearEntryCache?.(vid);
+        logger.info('StreamService', `收到单次有效刷新指令，已清空播放计划与模型缓存: vid=${vid}, token=${refreshToken}`);
+        while (this.consumedRefreshes.size > 200) {
+          this.consumedRefreshes.delete(this.consumedRefreshes.keys().next().value);
+        }
+      }
     }
     const nextVids = [];
     if (req.query?.next_vids) {
@@ -493,8 +537,12 @@ class StreamService {
           this.quickAborts.set(planKey, history);
           if (history.count >= 2) {
             this.plans.delete(planKey);
+            this.plans.delete(String(vid));
+            this.cache.delete(planKey);
+            this.cache.delete(String(vid));
             this.quickAborts.delete(planKey);
-            logger.warn('StreamService', `分集 ${vid} 连续发生快速断连 (${history.count}次)，可能为慢节点或解码受阻，已强制清除当前流计划缓存`);
+            appSource.clearEntryCache?.(vid);
+            logger.warn('StreamService', `分集 ${vid} 连续发生快速断连 (${history.count}次)，可能为慢节点或解码受阻，已强制清除当前流计划与上游模型缓存`);
           }
         } else {
           this.quickAborts.set(planKey, { count: 1, lastTime: Date.now() });

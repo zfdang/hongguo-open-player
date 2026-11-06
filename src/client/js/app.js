@@ -376,7 +376,7 @@ createApp({
       const params = [];
       if (nextEp1?.vid) params.push(`next_vid=${encodeURIComponent(nextEp1.vid)}`);
       if (nextList.length > 1) params.push(`next_vids=${encodeURIComponent(nextList.join(','))}`);
-      if (streamRefreshTick.value > 0) params.push('refresh=1');
+      if (streamRefreshTick.value > 0) params.push(`refresh=${streamRefreshTick.value}`);
       return `/api/stream/${ep.vid}${params.length ? '?' + params.join('&') : ''}`;
     });
 

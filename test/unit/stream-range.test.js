@@ -169,9 +169,14 @@ test('stream admission limits the number of waiting requests', async () => {
   assert.equal(service.waitingStreams.length, 0);
 });
 
-test('consecutive rapid client disconnections evict cached streaming plan to prevent retry deadlocks', async () => {
+test('consecutive rapid client disconnections evict cached streaming plan and entryCache, enabling plan rebuild', async () => {
   const { Writable } = require('node:stream');
   const service = new StreamService();
+  const appSource = require('../../src/server/native/app-source');
+  let clearedVid = null;
+  const originalClear = appSource.clearEntryCache;
+  appSource.clearEntryCache = (vid) => { clearedVid = vid; };
+
   const mockPlan = {
     size: 100,
     bytes: 100,
@@ -182,72 +187,103 @@ test('consecutive rapid client disconnections evict cached streaming plan to pre
   };
   service.plans.set('vid-rapid:auto', { plan: mockPlan, expires: Date.now() + 90000 });
 
-  // First abort (<300ms)
-  const res1 = new Writable({ write(chunk, enc, cb) { cb(); } });
-  res1.writeHead = () => {};
-  await service.handleStream({ headers: { range: 'bytes=0-50' } }, res1, 'vid-rapid');
-  assert.ok(service.plans.has('vid-rapid:auto'), 'Single abort should keep plan');
-
-  // Second abort within 3 seconds (<300ms)
-  const res2 = new Writable({ write(chunk, enc, cb) { cb(); } });
-  res2.writeHead = () => {};
-  await service.handleStream({ headers: { range: 'bytes=0-50' } }, res2, 'vid-rapid');
-  assert.ok(!service.plans.has('vid-rapid:auto'), 'Consecutive rapid aborts should evict plan');
-});
-
-test('refresh=1 query clears cached streaming plan and app entry cache', async () => {
-  const service = new StreamService();
-  const appSource = require('../../src/server/native/app-source');
-  let clearedVid = null;
-  const originalClear = appSource.clearEntryCache;
-  appSource.clearEntryCache = (vid) => { clearedVid = vid; };
-
   try {
-    service.plans.set('vid-refresh:auto', { plan: { bytes: 100 }, expires: Date.now() + 90000 });
-    service.cache.set('vid-refresh:auto', { buffer: Buffer.from('cached') });
+    // First abort (<300ms)
+    const res1 = new Writable({ write(chunk, enc, cb) { cb(); } });
+    res1.writeHead = () => {};
+    await service.handleStream({ headers: { range: 'bytes=0-50' } }, res1, 'vid-rapid');
+    assert.ok(service.plans.has('vid-rapid:auto'), 'Single abort should keep plan');
+    assert.equal(clearedVid, null);
 
-    let planCalled = false;
+    // Second abort within 3 seconds (<300ms)
+    const res2 = new Writable({ write(chunk, enc, cb) { cb(); } });
+    res2.writeHead = () => {};
+    await service.handleStream({ headers: { range: 'bytes=0-50' } }, res2, 'vid-rapid');
+    assert.ok(!service.plans.has('vid-rapid:auto'), 'Consecutive rapid aborts should evict plan');
+    assert.equal(clearedVid, 'vid-rapid', 'Consecutive rapid aborts should evict entryCache');
+
+    // Next request triggers a plan rebuild rather than returning stale cached plan
+    let planRebuilt = false;
     service.getStreamingPlan = async () => {
-      planCalled = true;
-      return { size: 10, bytes: 10, read: async function* () { yield Buffer.from('0123456789'); } };
+      planRebuilt = true;
+      return { size: 10, bytes: 10, read: async function* () { yield Buffer.from('rebuilt012'); } };
     };
-
-    const res = { writeHead(code, headers) { this.status = code; }, end() { this.ended = true; } };
-    await service.handleStream({ headers: { range: 'bytes=0-4' }, query: { refresh: '1' } }, res, 'vid-refresh');
-
-    assert.equal(service.plans.has('vid-refresh:auto'), false);
-    assert.equal(clearedVid, 'vid-refresh');
-    assert.equal(planCalled, true);
+    const res3 = new Writable({ write(chunk, enc, cb) { cb(); } });
+    res3.writeHead = () => {};
+    await service.handleStream({ headers: { range: 'bytes=0-4' } }, res3, 'vid-rapid');
+    assert.equal(planRebuilt, true);
   } finally {
     appSource.clearEntryCache = originalClear;
   }
 });
 
-test('getStreamingPlan deprioritizes throttled v9-reading-video CDN variant', async () => {
+test('refresh token is consumable once across multiple Range requests', async () => {
+  const { Writable } = require('node:stream');
   const service = new StreamService();
   const appSource = require('../../src/server/native/app-source');
   const rangeMedia = require('../../src/server/services/rangeMedia');
+  let clearCount = 0;
+  let fetchCount = 0;
+  const originalClear = appSource.clearEntryCache;
   const originalFetch = appSource.fetchAppPlayUrl;
   const originalPrepare = rangeMedia.prepareRangeMedia;
 
-  let testedVariant = null;
-  appSource.fetchAppPlayUrl = async () => ({
-    variants: [
-      { url: 'http://v9-reading-video.fqnovelvod.com/video1.mp4' },
-      { url: 'http://v3-reading-video.douyinvod.com/video2.mp4' },
-      { url: 'http://v9-reading-video-cold.fqnovelvod.com/video3.mp4' },
-    ]
-  });
-  rangeMedia.prepareRangeMedia = async (variant) => {
-    testedVariant = variant;
-    return { size: 100, bytes: 100, read: async function* () {} };
+  appSource.clearEntryCache = () => { clearCount++; };
+  appSource.fetchAppPlayUrl = async () => {
+    fetchCount++;
+    return { url: 'https://v3-reading-video.douyinvod.com/video.mp4', variants: [{ url: 'https://v3-reading-video.douyinvod.com/video.mp4' }] };
   };
+  rangeMedia.prepareRangeMedia = async () => ({
+    size: 10,
+    bytes: 10,
+    read: async function* () { yield Buffer.from('0123456789'); }
+  });
+
+  function createWritable() {
+    const res = new Writable({ write(chunk, enc, cb) { cb(); } });
+    res.writeHead = (code, headers) => { res.status = code; res.headers = headers; };
+    return res;
+  }
 
   try {
-    await service.getStreamingPlan('vid-cdn-priority', 'auto', new AbortController().signal);
-    assert.equal(testedVariant.url, 'http://v3-reading-video.douyinvod.com/video2.mp4');
+    service.plans.set('vid-refresh:auto', { plan: { bytes: 100, size: 100, read: async function* () {} }, expires: Date.now() + 90000 });
+
+    // First Range request with token 1: consumes token, clears cache, builds fresh plan
+    const res1 = createWritable();
+    await service.handleStream({ headers: { range: 'bytes=0-4' }, query: { refresh: '1' } }, res1, 'vid-refresh');
+    assert.equal(clearCount, 1);
+    assert.equal(fetchCount, 1);
+
+    // Second Range request with same token 1 (e.g. browser seeking or range chunking): token already consumed, reuses plan without clearing
+    const res2 = createWritable();
+    await service.handleStream({ headers: { range: 'bytes=5-9' }, query: { refresh: '1' } }, res2, 'vid-refresh');
+    assert.equal(clearCount, 1, 'Same refresh token should not trigger cache clearing again');
+    assert.equal(fetchCount, 1, 'Same refresh token should reuse the active plan without re-fetching');
+
+    // Third Range request with new token 2 (user clicked retry again): consumes new token, clears and rebuilds
+    const res3 = createWritable();
+    await service.handleStream({ headers: { range: 'bytes=0-4' }, query: { refresh: '2' } }, res3, 'vid-refresh');
+    assert.equal(clearCount, 2);
+    assert.equal(fetchCount, 2);
   } finally {
+    appSource.clearEntryCache = originalClear;
     appSource.fetchAppPlayUrl = originalFetch;
     rangeMedia.prepareRangeMedia = originalPrepare;
   }
+});
+
+test('sortVariantsByCdnPriority preserves codec and resolution tier precedence while deprioritizing v9 within each tier', () => {
+  const service = new StreamService();
+  const v1 = { codec: 'h264', quality: '1080p', width: 1080, height: 1920, url: 'http://v9-reading-video.fqnovelvod.com/v1.mp4' };
+  const v2 = { codec: 'h264', quality: '1080p', width: 1080, height: 1920, url: 'http://v3-reading-video.douyinvod.com/v2.mp4' };
+  const v3 = { codec: 'hevc', quality: '1080p', width: 1080, height: 1920, url: 'http://v3-reading-video.douyinvod.com/v3.mp4' };
+  const v4 = { codec: 'h264', quality: '720p', width: 720, height: 1280, url: 'http://v3-reading-video.douyinvod.com/v4.mp4' };
+
+  const sorted = service.sortVariantsByCdnPriority([v1, v2, v3, v4]);
+  // Within H.264 1080p, v2 (v3 CDN) is prioritized over v1 (v9 CDN)
+  assert.equal(sorted[0], v2);
+  assert.equal(sorted[1], v1);
+  // H.264 1080p v9 (v1) is NOT displaced behind HEVC (v3) or 720p (v4)
+  assert.equal(sorted[2], v3);
+  assert.equal(sorted[3], v4);
 });
