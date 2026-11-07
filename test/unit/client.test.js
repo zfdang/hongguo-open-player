@@ -975,6 +975,7 @@ test('enabled danmaku loads for each episode and retains display settings', asyn
   await state.openTheater({ series_id: '123456' });
   assert.equal(state.danmakuEnabled.value, true);
   assert.equal(state.danmakuRows.value, 3);
+  assert.equal(state.danmakuSpeed.value, 'medium');
   state.danmakuRows.value = 5;
   state.danmakuOpacity.value = 0.4;
   state.switchEpisode({ vid_index: 2 });
@@ -1011,7 +1012,7 @@ test('danmaku engine receives episode comments and is replaced when switching ep
   await new Promise(resolve => setImmediate(resolve));
   const first = instances.at(-1);
   assert.equal(first.options.comments[0].time, 2);
-  assert.equal(first.options.speed, 80);
+  assert.equal(first.options.speed, 60);
   state.switchEpisode({ vid_index: 2 });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(first.destroyed, true);

@@ -160,9 +160,9 @@ createApp({
         }
       } catch (_) { /* Keep defaults when stored preferences cannot be read. */ }
     }
-    const danmakuSpeed = ref('fast');
+    const danmakuSpeed = ref('medium');
     function danmakuSpeedForWidth(width) {
-      return Math.max(1, width / 10 * ({ fast: 1, medium: 0.75, slow: 0.5 }[danmakuSpeed.value] || 1));
+      return Math.max(1, width / 10 * ({ fast: 1, medium: 0.75, slow: 0.5 }[danmakuSpeed.value] || 0.75));
     }
     watch(danmakuSpeed, () => {
       if (danmakuEngine && danmakuLayer.value?.offsetWidth) danmakuEngine.speed = danmakuSpeedForWidth(danmakuLayer.value.offsetWidth);
