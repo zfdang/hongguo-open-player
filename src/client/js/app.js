@@ -162,7 +162,7 @@ createApp({
     }
     const danmakuSpeed = ref('medium');
     function danmakuSpeedForWidth(width) {
-      return Math.max(1, width / 10 * ({ fast: 1, medium: 0.75, slow: 0.5 }[danmakuSpeed.value] || 0.75));
+      return Math.max(1, width / ({ fast: 12, medium: 16, slow: 20 }[danmakuSpeed.value] || 16));
     }
     watch(danmakuSpeed, () => {
       if (danmakuEngine && danmakuLayer.value?.offsetWidth) danmakuEngine.speed = danmakuSpeedForWidth(danmakuLayer.value.offsetWidth);

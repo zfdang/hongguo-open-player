@@ -1012,7 +1012,7 @@ test('danmaku engine receives episode comments and is replaced when switching ep
   await new Promise(resolve => setImmediate(resolve));
   const first = instances.at(-1);
   assert.equal(first.options.comments[0].time, 2);
-  assert.equal(first.options.speed, 60);
+  assert.equal(first.options.speed, 50);
   state.switchEpisode({ vid_index: 2 });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(first.destroyed, true);
