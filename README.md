@@ -99,6 +99,7 @@ xattr -dr com.apple.quarantine "/Applications/红果开源播放器.app"
 * [`zhangbaio/hongguo`](https://github.com/zhangbaio/hongguo)：红果短剧协议解析与媒体解密开源研究项目，提供了 CENC 解密与移动端协议处理参考；
 * [`N3urda/hongguoTV`](https://github.com/N3urda/hongguoTV) / [`woshishiq1/drpys`](https://github.com/hjdhnx/drpy-node)：开源短剧爬虫与算法派生实践，提供了基于 Spade-A 派生 AES 密钥的计算逻辑参考；
 * [`jackotom/hongguo-drama`](https://github.com/jackotom/hongguo-drama)：提供了 MP4 CENC 容器格式重写（消除 `sinf` 还原为 `avc1`/`hvc1`）及媒体处理参考。
+* [`wxyzh/ffmpeg-bvc2`](https://github.com/wxyzh/ffmpeg-bvc2)：提供了基于 FFmpeg 的 ByteVC2 解码补丁及构建方案参考。
 
 ### 🖥️ 客户端产品与交互设计参考
 * [`yangbin1322/hongguo-player`](https://github.com/yangbin1322/hongguo-player)：原第三方 macOS 客户端，提供了 9:16 沉浸式竖屏观影体验与原型交互参考。
