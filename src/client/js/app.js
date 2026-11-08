@@ -1238,6 +1238,8 @@ createApp({
                 reportClientLog('WARN', '播放器源探测提示: 设备注册受阻（ERR_NETWORK），已展示网络/代理排查指引');
               } else if (errData?.code === 'SECURITY_BLOCKED') {
                 videoErrorMessage.value = '视频源地址未通过安全检查；请切换分集重试';
+              } else if (errData?.code === 'UNSUPPORTED_BYTEVC2') {
+                videoErrorMessage.value = '本集使用 ByteVC2 编码，当前播放器暂不支持';
               } else if (errData?.error) {
                 videoErrorMessage.value = `${errData.error}；请检查网络或重试切换分集`;
               }

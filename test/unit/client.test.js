@@ -928,6 +928,18 @@ test('onVideoError probes stream endpoint on code 4 and displays device registra
   assert.match(state.videoErrorMessage.value, /Clash\/去广告规则/);
 });
 
+test('onVideoError displays an unsupported ByteVC2 message', async () => {
+  const state = client(async url => url.startsWith('/api/stream/')
+    ? { ok: false, json: async () => ({ code: 'UNSUPPORTED_BYTEVC2' }) }
+    : response({}));
+  state.activeSeries.value = { series_id: '1', series_title: '测试短剧' };
+  state.activeEpisodes.value = [{ vid: '123', vid_index: 1 }];
+  state.activeEpisodeIndex.value = 1;
+  state.videoEl.value = { error: { code: 4, message: 'Format error' } };
+  await state.onVideoError();
+  assert.equal(state.videoErrorMessage.value, '本集使用 ByteVC2 编码，当前播放器暂不支持');
+});
+
 test('onVideoError displays custom stream error when probe reports other server error, and handles code 3', async () => {
   const state = client(async (url) => {
     if (url.startsWith('/api/stream/')) {

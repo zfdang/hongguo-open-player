@@ -22,6 +22,34 @@ function mockEntry(vid) {
   };
 }
 
+test('reports ByteVC2 only when no compatible source is available', async () => {
+  const originalRequest = appSource.requestJson;
+  appSource.clearEntryCache();
+  const entry = mockEntry('30001');
+  const model = JSON.parse(entry.video_model);
+  const compatible = model.video_list[0];
+  const bytevc2 = { ...compatible, codec_type: undefined, video_meta: { codec_type: 'bytevc2' } };
+  model.video_list = [bytevc2];
+  let requests = 0;
+  appSource.requestJson = async url => {
+    if (url.includes('register')) return { code: 0, device_id_str: '999', install_id_str: '888' };
+    requests++;
+    return { code: 0, data: { '30001': { video_model: JSON.stringify(model) } } };
+  };
+  try {
+    await assert.rejects(appSource.fetchAppPlayUrl('30001'), { code: 'UNSUPPORTED_BYTEVC2', message: /ByteVC2/ });
+    await assert.rejects(appSource.fetchAppPlayUrl('30001'), { code: 'UNSUPPORTED_BYTEVC2' });
+    assert.equal(requests, 1, 'repeated probes reuse the unsupported model');
+    model.video_list.push(compatible);
+    const result = await appSource.fetchAppPlayUrl('30001', { refresh: true });
+    assert.equal(result.codec, 'hevc');
+    await assert.rejects(appSource.fetchAppPlayUrl('30001', { refresh: true, quality: '4k' }), error => error.code !== 'UNSUPPORTED_BYTEVC2');
+  } finally {
+    appSource.requestJson = originalRequest;
+    appSource.clearEntryCache();
+  }
+});
+
 test('fetchAppPlayUrl batches nextVids and caches returned models in entryCache', async () => {
   const originalRequest = appSource.requestJson;
   appSource.clearEntryCache();
