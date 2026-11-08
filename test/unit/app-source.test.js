@@ -28,6 +28,8 @@ test('reports ByteVC2 only when no compatible source is available', async () => 
   const entry = mockEntry('30001');
   const model = JSON.parse(entry.video_model);
   const compatible = model.video_list[0];
+  compatible.vwidth = 640;
+  compatible.vheight = 360;
   const bytevc2 = { ...compatible, codec_type: undefined, video_meta: { codec_type: 'bytevc2' } };
   model.video_list = [bytevc2];
   let requests = 0;
@@ -43,7 +45,7 @@ test('reports ByteVC2 only when no compatible source is available', async () => 
     model.video_list.push(compatible);
     const result = await appSource.fetchAppPlayUrl('30001', { refresh: true });
     assert.equal(result.codec, 'hevc');
-    await assert.rejects(appSource.fetchAppPlayUrl('30001', { refresh: true, quality: '4k' }), error => error.code !== 'UNSUPPORTED_BYTEVC2');
+    await assert.rejects(appSource.fetchAppPlayUrl('30001', { refresh: true, quality: '1080p' }), /满足 1080p/);
   } finally {
     appSource.requestJson = originalRequest;
     appSource.clearEntryCache();
