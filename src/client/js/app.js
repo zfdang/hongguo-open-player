@@ -109,11 +109,65 @@ createApp({
       danmakuEngine?.destroy();
       danmakuEngine = null;
     }
+
+    function getDanmakuSecondCapacity(rows) {
+      if (rows <= 1) return 2;
+      if (rows <= 3) return 4;
+      return 7;
+    }
+
+    function prioritizeDanmakuItems(items, options = {}) {
+      if (!Array.isArray(items) || !items.length) return [];
+      const likesPriority = options.likesPriority !== false;
+      if (!likesPriority) return [...items];
+
+      const rows = Number(options.rows) || 3;
+      const capacity = getDanmakuSecondCapacity(rows);
+
+      // 按 1 秒时间片（Math.floor(time)）聚合
+      const buckets = new Map();
+      for (const item of items) {
+        const sec = Math.floor(Number(item.time) || 0);
+        let list = buckets.get(sec);
+        if (!list) {
+          list = [];
+          buckets.set(sec, list);
+        }
+        list.push(item);
+      }
+
+      const result = [];
+      for (const list of buckets.values()) {
+        if (list.length <= capacity) {
+          result.push(...list);
+          continue;
+        }
+        // 当某秒弹幕超出轨道容量时，优先保留点赞多的弹幕上屏，舍弃 0 赞/低赞弹幕
+        const sorted = [...list].sort((a, b) => {
+          const diff = (Number(b.likes) || 0) - (Number(a.likes) || 0);
+          if (diff !== 0) return diff;
+          return (Number(a.time) || 0) - (Number(b.time) || 0);
+        });
+
+        const selected = sorted.slice(0, capacity);
+        selected.sort((a, b) => (Number(a.time) || 0) - (Number(b.time) || 0));
+        result.push(...selected);
+      }
+
+      result.sort((a, b) => (Number(a.time) || 0) - (Number(b.time) || 0));
+      return result;
+    }
+
     function startDanmakuAnimation() {
       if (danmakuEngine || !danmakuEnabled.value || !videoEl.value || !danmakuLayer.value || typeof Danmaku === 'undefined') return;
       const layer = danmakuLayer.value;
-      const comments = danmakuItems.value.map(item => ({
+      const prioritized = prioritizeDanmakuItems(danmakuItems.value, {
+        rows: danmakuRows.value,
+        likesPriority: danmakuLikesPriority.value
+      });
+      const comments = prioritized.map(item => ({
         time: item.time,
+        likes: Number(item.likes) || 0,
         render() {
           const text = document.createElement('span');
           text.className = 'danmaku-item';
@@ -157,7 +211,7 @@ createApp({
         const response = await fetch('/api/preferences');
         if (!response.ok) throw new Error('读取失败');
         const prefs = await response.json();
-        const refs = { danmakuEnabled, danmakuRows, danmakuOpacity, danmakuSpeed, volume, isMuted, playbackRate, fitMode };
+        const refs = { danmakuEnabled, danmakuRows, danmakuOpacity, danmakuSpeed, danmakuLikesPriority, volume, isMuted, playbackRate, fitMode };
         for (const [key, value] of Object.entries(prefs)) {
           if (refs[key] && !changedPreferences.has(key)) refs[key].value = value;
         }
@@ -177,6 +231,12 @@ createApp({
       if (danmakuEngine && danmakuLayer.value?.offsetWidth) danmakuEngine.speed = danmakuSpeedForWidth(danmakuLayer.value.offsetWidth);
     });
     const danmakuRows = ref(3);
+    const danmakuLikesPriority = ref(true);
+    function toggleLikesPriority() {
+      danmakuLikesPriority.value = !danmakuLikesPriority.value;
+      savePreferences({ danmakuLikesPriority: danmakuLikesPriority.value });
+      refreshDanmakuEngine();
+    }
     const danmakuOpacity = ref(0.8);
     const danmakuItems = ref([]);
     const danmakuStatus = ref('');
@@ -219,7 +279,7 @@ createApp({
       if (likes >= 1) return '#a8dcff';
       return '#ffffff';
     }
-    watch([danmakuLayer, videoEl], refreshDanmakuEngine, { flush: 'post' });
+    watch([danmakuLayer, videoEl, danmakuRows, danmakuLikesPriority], refreshDanmakuEngine, { flush: 'post' });
     const showAboutModal = ref(false);
     const appVersion = ref('');
     const showShortcutsModal = ref(false);
@@ -1788,7 +1848,7 @@ createApp({
     });
 
     return {
-      savePreferences, danmakuEnabled, showDanmakuSettings, danmakuRows, danmakuOpacity, danmakuSpeed, danmakuStatus, danmakuLayer, danmakuColor, toggleDanmaku, loadDanmaku,
+      savePreferences, danmakuEnabled, showDanmakuSettings, danmakuRows, danmakuOpacity, danmakuSpeed, danmakuLikesPriority, toggleLikesPriority, prioritizeDanmakuItems, getDanmakuSecondCapacity, danmakuStatus, danmakuLayer, danmakuColor, toggleDanmaku, loadDanmaku,
       toastText, osdMessage, sidebarOpen, isScrubbing, previewTime, previewPercent, showPreview,
       isFullscreen, isControlsHidden, resetControlsTimer, clearControlsTimer, setControlsHidden, handleWindowMouseMove,
       previewSeek, seekFromSlider, startScrubbing, finishScrubbing,

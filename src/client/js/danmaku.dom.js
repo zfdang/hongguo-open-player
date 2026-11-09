@@ -305,6 +305,13 @@
         pendingList.push(cmt);
         ++this._.position;
       }
+      if (pendingList.length > 1) {
+        pendingList.sort(function(a, b) {
+          var diff = (b.likes || 0) - (a.likes || 0);
+          if (diff !== 0) return diff;
+          return (a.time || 0) - (b.time || 0);
+        });
+      }
       setup(this._.stage, pendingList);
       for (i = 0; i < pendingList.length; i++) {
         cmt = pendingList[i];
@@ -434,7 +441,8 @@
 
     this.comments = opt.comments || [];
     this.comments.sort(function(a, b) {
-      return a.time - b.time;
+      if (a.time !== b.time) return a.time - b.time;
+      return (b.likes || 0) - (a.likes || 0);
     });
     for (var i = 0; i < this.comments.length; i++) {
       this.comments[i].mode = formatMode(this.comments[i].mode);

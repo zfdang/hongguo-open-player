@@ -1055,6 +1055,82 @@ test('danmaku heat colors use fixed like thresholds', async () => {
   assert.equal(new Set([10, 100, 500].map(likes => state.danmakuColor({ likes }))).size, 3);
 });
 
+test('danmaku prioritize items drops 0-like comments and keeps high-like comments when density exceeds capacity', () => {
+  const state = client(async () => response([]));
+  const { prioritizeDanmakuItems, getDanmakuSecondCapacity } = state;
+
+  assert.equal(getDanmakuSecondCapacity(1), 2);
+  assert.equal(getDanmakuSecondCapacity(3), 4);
+  assert.equal(getDanmakuSecondCapacity(5), 7);
+
+  // 1. 密度在容量内时全量保留
+  const few = [
+    { time: 1.1, text: 'a', likes: 0 },
+    { time: 1.5, text: 'b', likes: 0 }
+  ];
+  const fewResult = prioritizeDanmakuItems(few, { rows: 3 });
+  assert.equal(fewResult.length, 2);
+  assert.equal(fewResult[0].text, 'a');
+  assert.equal(fewResult[1].text, 'b');
+
+  // 2. 某秒密度超过轨道容量时：高赞优先保留，超出容量的 0 赞舍弃
+  const dense = [
+    { time: 10.05, text: 'low1', likes: 0 },
+    { time: 10.10, text: 'low2', likes: 0 },
+    { time: 10.15, text: 'low3', likes: 0 },
+    { time: 10.20, text: 'hot1', likes: 800 },
+    { time: 10.35, text: 'hot2', likes: 350 },
+    { time: 10.45, text: 'hot3', likes: 120 },
+    { time: 10.50, text: 'low4', likes: 0 },
+    { time: 10.60, text: 'low5', likes: 0 }
+  ];
+  // 3 行对应每秒容量为 4 条
+  const result = prioritizeDanmakuItems(dense, { rows: 3, likesPriority: true });
+  assert.equal(result.length, 4);
+  const texts = result.map(x => x.text);
+  assert.ok(texts.includes('hot1'));
+  assert.ok(texts.includes('hot2'));
+  assert.ok(texts.includes('hot3'));
+  assert.ok(texts.includes('low1')); // 第 4 个空位由最早到达的 0 赞补齐
+  assert.ok(!texts.includes('low2'));
+  assert.ok(!texts.includes('low3'));
+  assert.ok(!texts.includes('low4'));
+  assert.ok(!texts.includes('low5'));
+  // 且保持按时间轴严格先后排序
+  assert.deepEqual(JSON.parse(JSON.stringify(result.map(x => x.time))), [10.05, 10.20, 10.35, 10.45]);
+
+  // 3. 关闭高赞优先开关时：保留全量原始弹幕
+  const disabled = prioritizeDanmakuItems(dense, { rows: 3, likesPriority: false });
+  assert.equal(disabled.length, dense.length);
+
+  // 4. 多秒独立聚合互不影响
+  const multiSec = [
+    { time: 1.1, text: 's1-1', likes: 0 },
+    { time: 1.2, text: 's1-2', likes: 0 },
+    { time: 1.3, text: 's1-3', likes: 0 },
+    { time: 2.1, text: 's2-1', likes: 100 },
+    { time: 2.2, text: 's2-2', likes: 0 }
+  ];
+  // 1 行容量为 2 条：第 1 秒裁为 2 条，第 2 秒本身只有 2 条全保留
+  assert.equal(prioritizeDanmakuItems(multiSec, { rows: 1 }).length, 4);
+});
+
+test('danmaku likes priority toggle updates preference and state', async () => {
+  const preferencesSaved = [];
+  const state = client(async (url, options) => {
+    if (url === '/api/preferences' && options?.method === 'POST') {
+      preferencesSaved.push(JSON.parse(options.body));
+      return response({});
+    }
+    return response({});
+  });
+  assert.equal(state.danmakuLikesPriority.value, true);
+  state.toggleLikesPriority();
+  assert.equal(state.danmakuLikesPriority.value, false);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(preferencesSaved.at(-1), { danmakuLikesPriority: false });
+});
+
 test('danmaku engine receives episode comments and is replaced when switching episodes', async () => {
   const instances = [];
   class FakeDanmaku {

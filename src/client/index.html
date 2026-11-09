@@ -388,6 +388,7 @@
                     <div class="danmaku-panel-row"><span>显示行数</span><div class="danmaku-row-options"><button v-for="n in [1, 3, 5]" :key="n" :class="{ active: danmakuRows === n }" @click="danmakuRows = n; savePreferences({ danmakuRows: n })">{{ n }} 行</button></div></div>
                     <div class="danmaku-panel-row"><span>滚动速度</span><div class="danmaku-row-options"><button v-for="option in [{ value: 'fast', label: '快' }, { value: 'medium', label: '中' }, { value: 'slow', label: '慢' }]" :key="option.value" :class="{ active: danmakuSpeed === option.value }" :aria-pressed="danmakuSpeed === option.value" @click="danmakuSpeed = option.value; savePreferences({ danmakuSpeed: option.value })">{{ option.label }}</button></div></div>
                     <label class="danmaku-panel-row"><span>不透明度</span><input type="range" min="0.1" max="1" step="0.1" v-model.number="danmakuOpacity" @change="savePreferences({ danmakuOpacity })" aria-label="弹幕不透明度"><span>{{ Math.round(danmakuOpacity * 100) }}%</span></label>
+                    <div class="danmaku-panel-row"><span>高赞优先</span><button class="danmaku-switch" :class="{ active: danmakuLikesPriority }" @click="toggleLikesPriority" :aria-pressed="danmakuLikesPriority" title="同屏冲突或弹幕密集时优先保留高赞弹幕，舍弃低赞/0赞弹幕">{{ danmakuLikesPriority ? '已开启' : '已关闭' }}</button></div>
                     <div v-if="danmakuEnabled && danmakuStatus" class="danmaku-status">{{ danmakuStatus }} <button v-if="danmakuStatus.includes('失败')" @click="loadDanmaku(true)">重试</button></div>
                   </div>
                 </div>

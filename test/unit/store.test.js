@@ -95,13 +95,15 @@ test('player preferences persist with existing data and reject invalid values', 
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const store = new Store(dir);
   await store.updateProgress({ series_id: '123', position_sec: 8 });
-  await store.updatePreferences({ volume: 0, isMuted: true, danmakuEnabled: false, danmakuRows: 5, danmakuOpacity: 0.4, playbackRate: '1.5', fitMode: 'cover' });
+  await store.updatePreferences({ volume: 0, isMuted: true, danmakuEnabled: false, danmakuRows: 5, danmakuOpacity: 0.4, danmakuLikesPriority: true, playbackRate: '1.5', fitMode: 'cover' });
   await store.updatePreferences({ volume: 0.5 });
   const loaded = new Store(dir);
   assert.equal(loaded.getPreferences().volume, 0.5);
   assert.equal(loaded.getPreferences().danmakuEnabled, false);
+  assert.equal(loaded.getPreferences().danmakuLikesPriority, true);
   assert.equal(loaded.getPreferences().fitMode, 'cover');
   assert.equal(loaded.getSeriesProgress('123').position_sec, 8);
   assert.throws(() => loaded.updatePreferences({ volume: 2 }));
+  assert.throws(() => loaded.updatePreferences({ danmakuLikesPriority: 'not-a-bool' }));
   assert.throws(() => loaded.updatePreferences({ arbitrary: true }));
 });
