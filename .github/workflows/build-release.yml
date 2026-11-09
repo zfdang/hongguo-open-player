@@ -75,7 +75,15 @@ jobs:
             output: x64
     steps:
       - uses: actions/checkout@v7
-      - if: runner.os == 'Windows'
+
+      - name: Restore ByteVC2 decoder cache
+        id: cache-bytevc2
+        uses: actions/cache@v6
+        with:
+          path: build/bytevc2/${{ matrix.output }}
+          key: bytevc2-${{ matrix.arch }}-${{ hashFiles('scripts/build-bytevc2.sh', 'vendor/bytevc2/**') }}
+
+      - if: runner.os == 'Windows' && steps.cache-bytevc2.outputs.cache-hit != 'true'
         uses: msys2/setup-msys2@v2
         with:
           msystem: CLANG64
@@ -84,12 +92,15 @@ jobs:
             mingw-w64-clang-x86_64-clang
             mingw-w64-clang-x86_64-pkgconf
       - name: Build decoder (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.cache-bytevc2.outputs.cache-hit != 'true'
         run: bash scripts/build-bytevc2.sh
       - name: Build decoder (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.cache-bytevc2.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: bash scripts/build-bytevc2.sh
+      - name: Ensure executable permissions
+        if: runner.os == 'macOS'
+        run: chmod +x "build/bytevc2/${{ matrix.output }}/ffmpeg"
       - uses: actions/upload-artifact@v7
         with:
           name: bytevc2-${{ matrix.arch }}
@@ -121,6 +132,20 @@ jobs:
         with:
           node-version: 22.x
           cache: 'npm'
+
+      - name: Cache Electron and electron-builder
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-builder-
 
       - name: Install dependencies
         run: npm ci
