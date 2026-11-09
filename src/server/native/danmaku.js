@@ -33,6 +33,8 @@
 const axios = require('axios');
 const fs = require('node:fs');
 const sign = require('./danmaku-sign');
+const { getPlaybackDevice } = require('./playback-device');
+const { requestJson } = require('./app-source');
 
 const BASE_URL = 'https://api5-normal-sinfonlineb.fqnovel.com';
 const COMMENT_PATH = vid => `/novel/commentapi/comment/list/${encodeURIComponent(vid)}/v1/`;
@@ -50,7 +52,7 @@ const MAX_ITEMS = 3000;                // 单集上限，防内存与 IPC 载荷
 const REQUEST_TIMEOUT = 20000;
 const EFFECTIVE_DURATION_MS = 3600000; // 单次请求声明的"剧集时长"
 const MAX_DURATION_MS = 24 * 60 * 60 * 1000; // 上游窗口上限，超过会被拒
-const MAX_EMPTY_PAGES = 2;             // 连续空页就停：上游偶尔 has_more=true 却一直给空
+const MAX_EMPTY_PAGES = 5;             // 连续空页就停（约 2.5 分钟窗口），避免片头空窗被误判为故障
 const PAGE_GAP_MS = 120;               // 相邻分页间隔，别把上游打急
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
@@ -61,14 +63,19 @@ const CACHE_MAX = 64;
 const cache = new Map();
 const pending = new Map();
 
-// 上游按匿名标识分配弹幕子集，跨重启必须复用同一份本机标识。
+// 上游按匿名标识分配弹幕子集，优先复用官方注册设备号；未就绪时降级至本机配置/本地伪造标识。
 let identity = null;
 let identityFile = null;
+let explicitIdentity = null;
+
 function setDeviceIdentityFile(file) {
   identityFile = file;
+  explicitIdentity = null;
   identity = null;
 }
+
 const deviceIdentity = () => {
+  if (explicitIdentity) return explicitIdentity;
   if (identity) return identity;
   const create = () => ({ deviceId: sign.newDeviceId(), installId: sign.newDeviceId() });
   if (!identityFile) return (identity = create());
@@ -85,7 +92,7 @@ const deviceIdentity = () => {
       }
     }
     if (typeof saved?.deviceId !== 'string' || typeof saved?.installId !== 'string' ||
-        !/^\d{19}$/.test(saved.deviceId) || !/^\d{19}$/.test(saved.installId)) throw new Error('Invalid local client');
+        !/^\d{6,30}$/.test(saved.deviceId) || !/^\d{6,30}$/.test(saved.installId)) throw new Error('Invalid local client');
     identity = { deviceId: saved.deviceId, installId: saved.installId };
   } catch {
     const error = new Error('Danmaku local configuration unavailable');
@@ -95,8 +102,24 @@ const deviceIdentity = () => {
   return identity;
 };
 
+/** 优先复用官方注册设备；测试或未就绪时降级至本机配置/本地伪造标识。 */
+async function resolveDeviceIdentity() {
+  if (explicitIdentity) return explicitIdentity;
+  if (identityFile) return deviceIdentity();
+  try {
+    const registered = await getPlaybackDevice(requestJson);
+    if (registered?.device_id && registered?.iid) {
+      return { deviceId: String(registered.device_id), installId: String(registered.iid) };
+    }
+  } catch (_) {
+    // 官方注册不可用时优雅降级至本地匿名设备号
+  }
+  return deviceIdentity();
+}
+
 /** 仅供测试：覆盖进程内设备指纹。 */
 function setDeviceIdentity(value) {
+  explicitIdentity = value;
   identity = value;
 }
 
@@ -173,7 +196,7 @@ function toSeconds(value) {
  * 首页 90 条。两个都读，显式的 `has_more: false` 优先。
  */
 function parsePage(payload, vid) {
-  const empty = { items: [], nextMs: null, hasMore: null };
+  const empty = { items: [], nextMs: null, hasMore: null, cursor: '' };
   if (!payload || typeof payload !== 'object') return empty;
   const data = payload.data;
   if (!data || typeof data !== 'object') return empty;
@@ -181,6 +204,7 @@ function parsePage(payload, vid) {
 
   let nextMs = null;
   let hasMore = null;
+  let rawCursor = '';
 
   const extra = data.extra;
   if (extra && typeof extra === 'object') {
@@ -193,6 +217,7 @@ function parsePage(payload, vid) {
 
   const info = data.common_list_info;
   if (info && typeof info === 'object') {
+    if (typeof info.cursor === 'string') rawCursor = info.cursor;
     const flag = info.has_more;
     if (typeof flag === 'boolean') hasMore = flag;
     else if (typeof flag === 'string') hasMore = ['1', 'true', 'yes'].includes(flag.trim().toLowerCase());
@@ -256,12 +281,12 @@ function parsePage(payload, vid) {
   }
 
   if (nextMs !== null && nextMs <= 0) nextMs = null;
-  return { items, nextMs, hasMore };
+  return { items, nextMs, hasMore, cursor: rawCursor };
 }
 
 // ── 请求 ──────────────────────────────────────────────────────────────────
 
-function buildBody(vid, bookId, start, duration) {
+function buildBody(vid, bookId, start, duration, cursor = '') {
   return {
     comment_source: 601,
     server_channel: 1000,
@@ -270,7 +295,7 @@ function buildBody(vid, bookId, start, duration) {
     comment_type: 20,
     sort: 1,
     count: PAGE_COUNT,
-    cursor: '',
+    cursor: typeof cursor === 'string' ? cursor : '',
     aid: 8662,
     compliance_status: 0,
     business_param: {
@@ -288,11 +313,11 @@ function buildBody(vid, bookId, start, duration) {
  * 时间戳与 nonce 在**同一个函数里**生成并共用：签名是对 query 字符串算的，
  * query 里含 `_rticket`，而 `X-Khronos` 用的是秒。三者不一致就是无效签名。
  */
-async function requestWindow({ vid, bookId, start, duration, transport = axios.post, now = Date.now, random = require('node:crypto').randomBytes }) {
+async function requestWindow({ vid, bookId, start, duration, cursor = '', transport = axios.post, now = Date.now, random = require('node:crypto').randomBytes, device }) {
   const stampMs = now();
   const stamp = Math.floor(stampMs / 1000);
   const nonce = random(sign.NONCE_BYTES);
-  const { deviceId, installId } = deviceIdentity();
+  const { deviceId, installId } = device || await resolveDeviceIdentity();
 
   const rawQuery = sign.buildQuery({ stampMs, deviceId, installId });
   const url = `${BASE_URL}${COMMENT_PATH(vid)}?${rawQuery}`;
@@ -307,7 +332,7 @@ async function requestWindow({ vid, bookId, start, duration, transport = axios.p
     ...sign.signCommentHeaders({ rawQuery, stamp, nonce }),
   };
 
-  const response = await transport(url, JSON.stringify(buildBody(vid, bookId, start, duration)), {
+  const response = await transport(url, JSON.stringify(buildBody(vid, bookId, start, duration, cursor)), {
     headers,
     timeout: REQUEST_TIMEOUT,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT),
@@ -346,8 +371,8 @@ async function requestWindow({ vid, bookId, start, duration, transport = axios.p
 function finalize({ seriesId, vid, items, truncated, error }) {
   let notice;
   if (error) notice = error;
-  else if (truncated) notice = `弹幕较多，本次仅载入前 ${items.length} 条`;
   else if (!items.length) notice = '本集暂无弹幕';
+  else if (truncated) notice = `弹幕较多，本次仅载入前 ${items.length} 条`;
   else notice = '';
   return {
     success: !error,
@@ -356,7 +381,7 @@ function finalize({ seriesId, vid, items, truncated, error }) {
     episode_id: vid,
     items,
     total: items.length,
-    truncated: Boolean(truncated),
+    truncated: Boolean(truncated) && items.length > 0,
     partial: Boolean(error) && items.length > 0,
     error: error || '',
     notice,
@@ -377,7 +402,7 @@ function present(result, items, limit) {
     items: sliced,
     total: sliced.length,
     truncated: true,
-    notice: result.error ? result.notice : `弹幕较多，本次仅载入前 ${sliced.length} 条`,
+    notice: result.error ? result.notice : !sliced.length ? '本集暂无弹幕' : `弹幕较多，本次仅载入前 ${sliced.length} 条`,
   };
 }
 
@@ -425,6 +450,7 @@ async function fetchDanmaku(options = {}) {
     const seen = new Set();
     let start = 0;
     let duration = EFFECTIVE_DURATION_MS;
+    let cursor = '';
     let emptyPages = 0;
     let truncated = false;
     let failure = '';
@@ -435,7 +461,7 @@ async function fetchDanmaku(options = {}) {
 
         let payload;
         try {
-          payload = await requestWindow({ vid, bookId: seriesId, start, duration, transport, now, random });
+          payload = await requestWindow({ vid, bookId: seriesId, start, duration, cursor, transport, now, random, device: options.device });
         } catch (error) {
           // 错误说明要能让用户自己判断：发生了什么、已经试过什么、还能做什么。
           // 首页失败说明源不可用；后续页失败则保留已拿到的部分，不把整集判死。
@@ -452,7 +478,8 @@ async function fetchDanmaku(options = {}) {
           break;
         }
 
-        const { items: pageItems, nextMs, hasMore } = parsePage(payload, vid);
+        const { items: pageItems, nextMs, hasMore, cursor: nextCursor } = parsePage(payload, vid);
+        if (nextCursor) cursor = nextCursor;
         if (pageItems.length) emptyPages = 0;
         else emptyPages++;
 
@@ -479,9 +506,13 @@ async function fetchDanmaku(options = {}) {
           }
           break;
         }
-        if (nextMs <= start || nextMs > MAX_TIME_SECONDS * 1000 || emptyPages >= MAX_EMPTY_PAGES || page === MAX_PAGES - 1) {
+        if (nextMs <= start || nextMs > MAX_TIME_SECONDS * 1000) {
           truncated = true;
           if (!collected.length) failure = '弹幕接口未返回有效分页，请稍后重试';
+          break;
+        }
+        if (emptyPages >= MAX_EMPTY_PAGES || page === MAX_PAGES - 1) {
+          truncated = true;
           break;
         }
         start = nextMs;
@@ -519,6 +550,8 @@ async function fetchDanmaku(options = {}) {
 function resetDanmakuCache() {
   cache.clear();
   pending.clear();
+  explicitIdentity = null;
+  identity = null;
 }
 
 module.exports = {
@@ -534,6 +567,7 @@ module.exports = {
   resetDanmakuCache,
   setDeviceIdentity,
   setDeviceIdentityFile,
+  resolveDeviceIdentity,
   BASE_URL,
   COMMENT_PATH,
   USER_AGENT,
