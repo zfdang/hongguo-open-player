@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { assertUnencryptedMp4 } = require('./hongguo');
 
 function binaryPath() {
   if (process.env.HONGGUO_BVC2_FFMPEG) return process.env.HONGGUO_BVC2_FFMPEG;
@@ -15,6 +16,7 @@ function binaryPath() {
 async function transcodeBytevc2(buffer, key, signal) {
   signal?.throwIfAborted();
   if (!Buffer.isBuffer(key) || ![0, 16].includes(key.length)) throw new Error('ByteVC2 片源密钥无效');
+  if (!key.length) assertUnencryptedMp4(buffer);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hongguo-bvc2-'));
   const input = path.join(dir, 'input.mp4');
   const output = path.join(dir, 'output.mp4');
@@ -70,6 +72,7 @@ async function transcodeBytevc2(buffer, key, signal) {
 async function* streamBytevc2(buffer, key, signal) {
   signal?.throwIfAborted();
   if (!Buffer.isBuffer(key) || ![0, 16].includes(key.length)) throw new Error('ByteVC2 片源密钥无效');
+  if (!key.length) assertUnencryptedMp4(buffer);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hongguo-bvc2-stream-'));
   let child;
   let completion;

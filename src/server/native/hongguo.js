@@ -1103,10 +1103,14 @@ function mp4TrackInfo(data, top, total) {
     }
 
     if (si !== n) throw new Error('MP4 sample-to-chunk count mismatch');
-    trackInfo.push({ sizes, offs: sampleOffs, ivs, stco });
+    trackInfo.push({ sizes, offs: sampleOffs, ivs, stco, encrypted });
   }
 
   return trackInfo;
+}
+
+function hasSampleEncryption(boxes) {
+  return boxes.some(box => box.typ === 'senc' || (box.children && hasSampleEncryption(box.children)));
 }
 
 /**
@@ -1135,6 +1139,9 @@ function decryptMp4Buffer(input, key) {
   }
 
   const trackInfo = mp4TrackInfo(data, top, total);
+  if ((hasSampleEncryption(top) || trackInfo.some(track => track.encrypted || track.ivs.length)) && (!Buffer.isBuffer(key) || key.length !== 16)) {
+    throw new Error('Invalid CENC key');
+  }
 
   for (const ti of trackInfo) {
     for (let i = 0; i < ti.offs.length; i++) {
@@ -1195,7 +1202,15 @@ function createMp4StreamingPlan(metadata, boxes, total) {
     .sort((a, b) => a.offset - b.offset);
   if (samples.length > 100000) throw new Error('MP4 sample count exceeds streaming budget');
   for (const sample of samples) if (!Number.isSafeInteger(sample.offset) || sample.offset + sample.size > total) throw new Error('Invalid encrypted MP4 sample');
-  return { size, segments, samples };
+  return { size, segments, samples, encrypted: hasSampleEncryption(localBoxes) || tracks.some(track => track.encrypted || track.ivs.length) };
+}
+
+function assertUnencryptedMp4(data) {
+  const boxes = parseBoxes(data, 0, data.length);
+  if (!boxes.some(box => box.typ === 'moov') || !boxes.some(box => box.typ === 'mdat')) throw new Error('MP4 requires moov and mdat');
+  if (hasSampleEncryption(boxes) || mp4TrackInfo(data, boxes, data.length).some(track => track.encrypted || track.ivs.length)) {
+    throw new Error('Invalid CENC key');
+  }
 }
 
 /**
@@ -1217,6 +1232,7 @@ module.exports = {
   decryptMp4File,
   decryptMp4Buffer,
   createMp4StreamingPlan,
+  assertUnencryptedMp4,
   VIDEO_REFERER,
   UA,
   WEB_UA,

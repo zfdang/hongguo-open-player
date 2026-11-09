@@ -22,6 +22,28 @@ function mockEntry(vid) {
   };
 }
 
+test('accepts absent encryption metadata but rejects declared encryption without a key', async () => {
+  const originalRequest = appSource.requestJson;
+  appSource.clearEntryCache();
+  const model = JSON.parse(mockEntry('30002').video_model);
+  delete model.video_list[0].encrypt_info;
+  appSource.requestJson = async url => url.includes('register')
+    ? { code: 0, device_id_str: '999', install_id_str: '888' }
+    : { code: 0, data: { '30002': { video_model: JSON.stringify(model) } } };
+  try {
+    const result = await appSource.fetchAppPlayUrl('30002');
+    assert.equal(result.codec, 'hevc');
+    assert.equal(result.contentKey, null);
+    for (const encrypt_info of [{ encrypt: true }, {}]) {
+      model.video_list[0].encrypt_info = encrypt_info;
+      await assert.rejects(appSource.fetchAppPlayUrl('30002', { refresh: true }), { code: 'INVALID_RESPONSE' });
+    }
+  } finally {
+    appSource.requestJson = originalRequest;
+    appSource.clearEntryCache();
+  }
+});
+
 test('reports ByteVC2 only when no compatible source is available', async () => {
   const originalRequest = appSource.requestJson;
   appSource.clearEntryCache();

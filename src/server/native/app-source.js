@@ -378,7 +378,8 @@ async function parseEntryPlayInfo(vid, entry, requestedQuality, allowLowerQualit
     for (const selected of selectedRows) {
         try {
             const spade = selected.item.spade_a || selected.item.encrypt_info?.spade_a;
-            if (inline && !spade && ![false, 0, '0', 'false'].includes(selected.item.encrypt_info?.encrypt)) {
+            if (inline && !spade && selected.item.encrypt_info != null
+                && ![false, 0, '0', 'false'].includes(selected.item.encrypt_info?.encrypt)) {
                 throw Object.assign(new Error('本集片源缺少有效解密信息'), { code: 'INVALID_RESPONSE' });
             }
             const key = spade ? deriveContentKey(spade) : null;

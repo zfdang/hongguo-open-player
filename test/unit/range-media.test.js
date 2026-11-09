@@ -41,6 +41,28 @@ test('a CDN ignoring Range is detected before buffering its full response', asyn
   await assert.rejects(prepareRangeMedia({ url: `http://127.0.0.1:${server.address().port}` }, () => ({}), new AbortController().signal), { code: 'RANGE_UNSUPPORTED' });
 });
 
+test('streams clear MP4 without a key and rejects encrypted MP4 without one', async t => {
+  const key = crypto.randomBytes(16);
+  const encrypted = encryptedMp4(crypto.randomBytes(1024), key, crypto.randomBytes(8));
+  const clear = decryptMp4Buffer(encrypted, key);
+  let data = clear;
+  const server = http.createServer((req, res) => {
+    const [, a, b] = req.headers.range.match(/bytes=(\d+)-(\d+)/);
+    const from = Number(a), to = Math.min(Number(b), data.length - 1);
+    res.writeHead(206, { 'Content-Range': `bytes ${from}-${to}/${data.length}` });
+    res.end(data.subarray(from, to + 1));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const variant = { url: `http://127.0.0.1:${server.address().port}` };
+  const plan = await prepareRangeMedia(variant, () => ({}), new AbortController().signal);
+  const chunks = [];
+  for await (const chunk of plan.read(0, plan.size - 1, new AbortController().signal)) chunks.push(chunk);
+  assert.deepEqual(Buffer.concat(chunks), clear);
+  data = encrypted;
+  await assert.rejects(prepareRangeMedia(variant, () => ({}), new AbortController().signal), /Invalid CENC key/);
+});
+
 
 test('prefetch handles short files and rejects malformed range responses', async t => {
   const key = crypto.randomBytes(16);

@@ -29,7 +29,7 @@ test('faststart places moov before media and relocates chunk offsets', () => {
     table.writeUInt32BE(1, 4);
     table.writeUInt32BE(offset, 8);
     return box('moov', box('trak', box('mdia', box('minf', box('stbl',
-      Buffer.concat([box('stco', table), box('senc')]))))));
+      box('stco', table))))));
   }
   for (const mediaFirst of [true, false]) {
     const media = box('mdat', Buffer.alloc(100));
@@ -38,7 +38,7 @@ test('faststart places moov before media and relocates chunk offsets', () => {
     const input = mediaFirst ? Buffer.concat([media, moov(offset)]) : Buffer.concat([moov(offset), media]);
     const output = decryptMp4Buffer(input);
     const tablePosition = output.indexOf(Buffer.from('stco')) - 4;
-    assert.equal(output.readUInt32BE(tablePosition + 16), originalMoov.length);
+    assert.equal(output.readUInt32BE(tablePosition + 16), originalMoov.length + 8);
     assert.ok(output.indexOf(Buffer.from('moov')) < output.indexOf(Buffer.from('mdat')));
   }
 });
@@ -67,4 +67,16 @@ test('whole-file decryption preserves the encrypted input buffer', () => {
   const original = Buffer.from(input);
   decryptMp4Buffer(input, Buffer.alloc(16));
   assert.deepEqual(input, original);
+});
+
+test('missing keys reject encrypted MP4 while allowing clear MP4', () => {
+  const { encryptedMp4 } = require('../helpers/mp4');
+  const { assertUnencryptedMp4 } = require('../../src/server/native/hongguo');
+  const key = Buffer.alloc(16);
+  const encrypted = encryptedMp4(Buffer.alloc(32), key, Buffer.alloc(8));
+  assert.throws(() => decryptMp4Buffer(encrypted), /Invalid CENC key/);
+  assert.throws(() => assertUnencryptedMp4(encrypted), /Invalid CENC key/);
+  const clear = decryptMp4Buffer(encrypted, key);
+  assert.doesNotThrow(() => assertUnencryptedMp4(clear));
+  assert.deepEqual(decryptMp4Buffer(clear), clear);
 });

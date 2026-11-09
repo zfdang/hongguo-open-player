@@ -71,7 +71,7 @@ async function prepareRangeMedia(variant, requestOptions, signal) {
   if (!metadata) throw new Error('MP4 metadata is missing');
   const plan = createMp4StreamingPlan(metadata, boxes, total);
   const key = Buffer.isBuffer(variant.contentKey) ? variant.contentKey : Buffer.from(variant.contentKey || '', 'hex');
-  if (plan.samples.length && key.length !== 16) throw new Error('Invalid CENC key');
+  if (plan.encrypted && key.length !== 16) throw new Error('Invalid CENC key');
   logger.info('RangeMedia', `MP4 CENC元数据解析完成: 总大小=${total} 字节, Boxes=[${boxes.map(b => b.typ).join(',')}], moov大小=${metadata.length} 字节, CENC加密样本数=${plan.samples.length}`);
   // The metadata request signal belongs to a single acquisition. Each response
   // receives its own cancellation signal, so cached plans outlive closed requests.
