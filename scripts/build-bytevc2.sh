@@ -28,7 +28,7 @@ patch -p1 < "$root/vendor/bytevc2/0001-add-bvc2-decoder.patch"
 export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
 ./configure --disable-everything --disable-doc --disable-debug --disable-autodetect --disable-asm \
   --disable-ffplay --disable-ffprobe --enable-ffmpeg --enable-static --disable-shared \
-  --enable-protocol=file --enable-demuxer=mov --enable-muxer=mp4 \
+  --enable-protocol=file,pipe --enable-demuxer=mov --enable-muxer=mp4 \
   --enable-decoder=bvc2,aac --enable-encoder=libx264,aac --enable-libx264 \
   --enable-filter=scale,format,aresample --enable-gpl --enable-version3 \
   --pkg-config-flags=--static $cc_flags ${extra_ldflags:+--extra-ldflags=$extra_ldflags}

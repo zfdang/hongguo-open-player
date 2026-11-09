@@ -400,7 +400,7 @@ async function parseEntryPlayInfo(vid, entry, requestedQuality, allowLowerQualit
             }
         } catch (error) { lastError = error; }
     }
-    if (variants.length) return { ...variants[0], variants };
+    if (variants.length) return { ...variants[0], variants, duration: Number(model.video_duration || info.video_duration) || 0 };
     throw lastError?.code === 'SECURITY_BLOCKED' ? lastError
         : Object.assign(new Error('本集片源地址或密钥无法解析'), { code: 'INVALID_RESPONSE' });
 }

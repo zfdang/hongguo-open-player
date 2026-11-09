@@ -62,7 +62,7 @@ app.use((req, res, next) => {
       const msg = `${req.method} ${req.originalUrl || req.url} -> ${res.statusCode} (${duration}ms)`;
       if (res.statusCode >= 500) {
         logger.error('API', msg);
-      } else if (res.statusCode >= 400) {
+      } else if (res.statusCode >= 400 && res.getHeader('X-Stream-Mode') !== 'bytevc2-progressive') {
         logger.warn('API', msg);
       } else {
         logger.info('API', msg);

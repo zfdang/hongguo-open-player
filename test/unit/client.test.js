@@ -940,6 +940,51 @@ test('onVideoError displays an unsupported ByteVC2 message', async () => {
   assert.equal(state.videoErrorMessage.value, '本集使用 ByteVC2 编码，当前播放器暂不支持');
 });
 
+test('ByteVC2 progressive playback starts on detection and stops on switching episodes', async () => {
+  let started, stopped = 0;
+  const state = client(async url => url.startsWith('/api/stream/')
+    ? { ok: false, json: async () => ({ code: 'BYTEVC2_PROGRESSIVE', duration: 46 }) }
+    : response({}), {
+    window: { addEventListener() {}, removeEventListener() {}, Bytevc2Stream: {
+      supported: () => true,
+      start(video, url, duration) { started = { video, url, duration }; return { stop() { stopped++; } }; }
+    } }
+  });
+  state.activeSeries.value = { series_id: '1', series_title: '测试短剧' };
+  state.activeEpisodes.value = [{ vid: '123', vid_index: 1 }, { vid: '456', vid_index: 2 }];
+  state.activeEpisodeIndex.value = 1;
+  state.videoEl.value = { error: { code: 4 }, play: async () => {}, pause() {} };
+  await state.onVideoError();
+  assert.match(started.url, /mse=stream/);
+  assert.equal(started.duration, 46);
+  state.switchEpisode({ vid_index: 2 });
+  assert.equal(stopped, 1);
+});
+
+test('progressive playback failure falls back to buffered conversion', async () => {
+  let fail;
+  const state = client(async url => url.startsWith('/api/stream/')
+    ? { ok: false, json: async () => ({ code: 'BYTEVC2_PROGRESSIVE', duration: 46 }) }
+    : response({}), {
+    window: { addEventListener() {}, removeEventListener() {}, Bytevc2Stream: {
+      supported: () => true,
+      start(_video, _url, _duration, onError) { fail = onError; return { stop() {} }; }
+    } }
+  });
+  state.activeSeries.value = { series_id: '1', series_title: '测试短剧' };
+  state.activeEpisodes.value = [{ vid: '123', vid_index: 1 }];
+  state.activeEpisodeIndex.value = 1;
+  let loaded = 0;
+  state.videoEl.value = { error: { code: 4 }, currentTime: 12, load() { loaded++; }, play: async () => {} };
+  await state.onVideoError();
+  fail(new Error('failed'));
+  assert.match(state.videoEl.value.src, /mse=buffered/);
+  assert.equal(loaded, 1);
+  state.videoEl.value.duration = 46;
+  state.onLoadedMetadata();
+  assert.equal(state.videoEl.value.currentTime, 12);
+});
+
 test('onVideoError displays custom stream error when probe reports other server error, and handles code 3', async () => {
   const state = client(async (url) => {
     if (url.startsWith('/api/stream/')) {

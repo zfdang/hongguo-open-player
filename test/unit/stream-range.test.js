@@ -2,6 +2,75 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const StreamService = require('../../src/server/services/streamService').constructor;
 
+test('progressive ByteVC2 streams fragments and reuses completed conversions', async () => {
+  const http = require('node:http');
+  const appSource = require('../../src/server/native/app-source');
+  const original = appSource.fetchAppPlayUrl;
+  let conversions = 0;
+  const key = '0123456789abcdef0123456789abcdef';
+  const service = new StreamService({ progressiveTranscode: async function* (input, actualKey) {
+    conversions++;
+    assert.equal(input.toString(), 'encrypted');
+    assert.equal(actualKey.toString('hex'), key);
+    yield Buffer.from('first');
+    yield Buffer.from('second');
+  } });
+  appSource.fetchAppPlayUrl = async () => ({ codec: 'bytevc2', duration: 46, url: 'https://example.com/video', contentKey: key });
+  service.downloadFastestMedia = async (_variants, variant) => ({ buffer: Buffer.from('encrypted'), variant });
+  const server = http.createServer((req, res) => {
+    req.query = Object.fromEntries(new URL(req.url, 'http://localhost').searchParams);
+    service.handleStream(req, res, '123');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}/`;
+  try {
+    let response = await fetch(`${base}?mse=1`);
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { code: 'BYTEVC2_PROGRESSIVE', duration: 46 });
+    response = await fetch(`${base}?mse=stream`);
+    assert.equal(await response.text(), 'firstsecond');
+    response = await fetch(`${base}?mse=1`);
+    assert.equal((await response.json()).duration, 46);
+    response = await fetch(`${base}?mse=stream`);
+    assert.equal(await response.text(), 'firstsecond');
+    assert.equal(conversions, 1);
+  } finally {
+    service.shutdown();
+    appSource.fetchAppPlayUrl = original;
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('disconnecting a progressive stream cancels the active conversion', async () => {
+  const http = require('node:http');
+  const appSource = require('../../src/server/native/app-source');
+  const original = appSource.fetchAppPlayUrl;
+  let cancelled;
+  const cancelledPromise = new Promise(resolve => { cancelled = resolve; });
+  const service = new StreamService({ progressiveTranscode: async function* (_input, _key, signal) {
+    try {
+      yield Buffer.from('fragment');
+      if (!signal.aborted) await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+    } finally { cancelled(); }
+  } });
+  appSource.fetchAppPlayUrl = async () => ({ codec: 'bytevc2', duration: 46, url: 'https://example.com/video', contentKey: null });
+  service.downloadFastestMedia = async (_variants, variant) => ({ buffer: Buffer.from('encrypted'), variant });
+  const server = http.createServer((req, res) => { req.query = { mse: 'stream' }; service.handleStream(req, res, '123'); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const controller = new AbortController();
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/`, { signal: controller.signal });
+    await response.body.getReader().read();
+    controller.abort();
+    await cancelledPromise;
+    assert.equal(service.fragmentCache.size, 0);
+  } finally {
+    service.shutdown();
+    appSource.fetchAppPlayUrl = original;
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('ByteVC2 uses buffered transcoding and caches the resulting playable video', async () => {
   const appSource = require('../../src/server/native/app-source');
   const original = appSource.fetchAppPlayUrl;
@@ -25,6 +94,19 @@ test('ByteVC2 uses buffered transcoding and caches the resulting playable video'
     assert.equal((await service.getDecryptedBuffer('123', 'auto', { signal })).toString(), 'playable');
     assert.equal((await service.getDecryptedBuffer('123', 'auto', { signal })).toString(), 'playable');
     assert.equal(conversions, 1);
+  } finally {
+    service.shutdown();
+    appSource.fetchAppPlayUrl = original;
+  }
+});
+
+test('ByteVC2 without a usable duration falls back to buffered playback', async () => {
+  const appSource = require('../../src/server/native/app-source');
+  const original = appSource.fetchAppPlayUrl;
+  const service = new StreamService();
+  appSource.fetchAppPlayUrl = async () => ({ codec: 'bytevc2', duration: 0 });
+  try {
+    assert.equal(await service.getStreamingPlan('123', 'auto', new AbortController().signal, 0, [], true), null);
   } finally {
     service.shutdown();
     appSource.fetchAppPlayUrl = original;

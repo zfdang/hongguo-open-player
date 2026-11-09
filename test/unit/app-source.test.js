@@ -27,6 +27,7 @@ test('reports ByteVC2 only when no compatible source is available', async () => 
   appSource.clearEntryCache();
   const entry = mockEntry('30001');
   const model = JSON.parse(entry.video_model);
+  model.video_duration = 46.069;
   const compatible = model.video_list[0];
   compatible.vwidth = 640;
   compatible.vheight = 360;
@@ -44,6 +45,7 @@ test('reports ByteVC2 only when no compatible source is available', async () => 
     assert.equal(requests, 1, 'repeated probes reuse the unsupported model');
     const bvc = await appSource.fetchAppPlayUrl('30001', { allowBytevc2: true });
     assert.equal(bvc.codec, 'bytevc2');
+    assert.equal(bvc.duration, 46.069);
     assert.equal(requests, 1);
     model.video_list.push(compatible);
     const result = await appSource.fetchAppPlayUrl('30001', { refresh: true, allowBytevc2: true });

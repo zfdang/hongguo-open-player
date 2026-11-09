@@ -371,6 +371,8 @@ createApp({
     // 当前选集分组
     const currentGroup = ref({ start: 1, end: 30 });
     const streamRefreshTick = ref(0);
+    let bytevc2Session = null;
+    let bytevc2Fallback = null;
 
     // 当前播放直链 (通过本地边下边解代理)
     const currentStreamUrl = computed(() => {
@@ -382,6 +384,7 @@ createApp({
       const nextEp3 = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value + 3);
       const nextList = [nextEp1?.vid, nextEp2?.vid, nextEp3?.vid].filter(Boolean);
       const params = [];
+      if (window.Bytevc2Stream?.supported()) params.push('mse=1');
       if (nextEp1?.vid) params.push(`next_vid=${encodeURIComponent(nextEp1.vid)}`);
       if (nextList.length > 1) params.push(`next_vids=${encodeURIComponent(nextList.join(','))}`);
       if (streamRefreshTick.value > 0) params.push(`refresh=${streamRefreshTick.value}`);
@@ -880,6 +883,9 @@ createApp({
     // ================= 沉浸式剧场与播放逻辑 =================
 
     function resetPlayback() {
+      bytevc2Session?.stop();
+      bytevc2Session = null;
+      bytevc2Fallback = null;
       lastNearEndPrefetch = 0;
       stopDanmakuAnimation();
       progressReady = false;
@@ -1213,12 +1219,12 @@ createApp({
     }
 
     async function onVideoError(e) {
-      console.error('[Player] 视频播放器报错:', e);
       isBuffering.value = false;
       if (e?.target && e.target !== videoEl.value) return;
+      if (bytevc2Session && bytevc2Fallback) { bytevc2Fallback(); return; }
       const code = videoEl.value?.error?.code;
       const message = videoEl.value?.error?.message || '';
-      reportClientLog('ERROR', `播放器解码/渲染报错: code=${code}, message=${message}`);
+      if (code !== 4) reportClientLog('ERROR', `播放器解码/渲染报错: code=${code}, message=${message}`);
       if (code === 3) {
         videoErrorMessage.value = '视频解码失败；请重试或更换分集，Windows 用户请确认已安装 HEVC 视频扩展';
       } else if (code === 4) {
@@ -1233,7 +1239,31 @@ createApp({
             });
             if (!probeRes.ok && activeEpisodeIndex.value === currentEpIndex) {
               const errData = await probeRes.json().catch(() => null);
-              if (errData?.code === 'DEVICE_REGISTRATION_FAILED' || /匿名播放设备注册失败|ERR_NETWORK/i.test(errData?.error || '')) {
+              if (activeEpisodeIndex.value !== currentEpIndex || currentStreamUrl.value !== streamUrl) return;
+              if (errData?.code !== 'BYTEVC2_PROGRESSIVE') reportClientLog('ERROR', `播放器解码/渲染报错: code=${code}, message=${message}`);
+              if (errData?.code === 'BYTEVC2_PROGRESSIVE' && window.Bytevc2Stream?.supported() && Number(errData.duration) > 0) {
+                videoErrorMessage.value = '';
+                isBuffering.value = true;
+                const video = videoEl.value;
+                const progressiveUrl = streamUrl.replace(/([?&])mse=1(?=&|$)/, '$1mse=stream');
+                bytevc2Session?.stop();
+                bytevc2Fallback = () => {
+                  if (video !== videoEl.value || currentStreamUrl.value !== streamUrl) return;
+                  reportClientLog('WARN', 'ByteVC2 分片播放失败，回退至完整转换');
+                  const position = video.currentTime || 0;
+                  pendingResumeSec = position;
+                  bytevc2Session?.stop();
+                  bytevc2Session = null;
+                  bytevc2Fallback = null;
+                  video.src = streamUrl.replace(/([?&])mse=1(?=&|$)/, '$1mse=buffered');
+                  video.load();
+                  video.play().catch(() => {});
+                };
+                try {
+                  bytevc2Session = window.Bytevc2Stream.start(video, progressiveUrl, Number(errData.duration), bytevc2Fallback);
+                } catch (_) { bytevc2Fallback(); return; }
+                video.play().catch(() => {});
+              } else if (errData?.code === 'DEVICE_REGISTRATION_FAILED' || /匿名播放设备注册失败|ERR_NETWORK/i.test(errData?.error || '')) {
                 videoErrorMessage.value = '播放设备注册受阻（ERR_NETWORK）；请检查网络连接、代理软件（Clash/去广告规则）或 DNS 设置';
                 reportClientLog('WARN', '播放器源探测提示: 设备注册受阻（ERR_NETWORK），已展示网络/代理排查指引');
               } else if (errData?.code === 'SECURITY_BLOCKED') {
@@ -1245,6 +1275,8 @@ createApp({
               } else if (errData?.error) {
                 videoErrorMessage.value = `${errData.error}；请检查网络或重试切换分集`;
               }
+            } else if (probeRes.ok && activeEpisodeIndex.value === currentEpIndex) {
+              reportClientLog('ERROR', `播放器解码/渲染报错: code=${code}, message=${message}`);
             }
           } catch (_) {
             if (activeEpisodeIndex.value === currentEpIndex && typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -1260,6 +1292,9 @@ createApp({
     }
 
     function retryCurrentEpisode() {
+      bytevc2Session?.stop();
+      bytevc2Session = null;
+      bytevc2Fallback = null;
       videoErrorMessage.value = '';
       streamRefreshTick.value++;
       if (videoEl.value) {
@@ -1468,6 +1503,7 @@ createApp({
     });
 
     onUnmounted(() => {
+      bytevc2Session?.stop();
       stopDanmakuAnimation();
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('click', handleGlobalClick);

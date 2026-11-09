@@ -5,17 +5,19 @@ const { pipeline } = require('node:stream/promises');
 const rangeMedia = require('./rangeMedia');
 const appSource = require('../native/app-source');
 const { decryptMp4Buffer } = require('../native/hongguo');
-const { transcodeBytevc2 } = require('../native/bytevc2-transcode');
+const { transcodeBytevc2, streamBytevc2 } = require('../native/bytevc2-transcode');
 const { normalizeDownloadQuality } = require('../native/download-quality');
 const { webMediaRequestOptions } = require('../native/web-media-guard');
 const logger = require('./logger');
 
 class StreamService {
-  constructor({ requestOptions = webMediaRequestOptions, transcode = transcodeBytevc2 } = {}) {
+  constructor({ requestOptions = webMediaRequestOptions, transcode = transcodeBytevc2, progressiveTranscode = streamBytevc2 } = {}) {
     this.requestOptions = requestOptions;
     this.transcode = transcode;
+    this.progressiveTranscode = progressiveTranscode;
     // 内存 LRU 缓存：vid -> { buffer, size, timestamp }
     this.cache = new Map();
+    this.fragmentCache = new Map();
     this.maxCacheBytes = 128 * 1024 * 1024;
     this.maxCacheCount = 15; // 保持最近播放的 15 集，约 100MB 内存占用
     // 正在下载解密中的 Promise 映射，避免并发 Range 请求重复下载
@@ -300,6 +302,7 @@ class StreamService {
     this.planPrefetch?.abort();
     for (const controller of this.streamControllers) controller.abort(new Error('Player stopped'));
     this.cache.clear();
+    this.fragmentCache.clear();
     this.plans.clear();
     this.quickAborts.clear();
     this.consumedRefreshes.clear();
@@ -357,14 +360,14 @@ class StreamService {
   /**
    * 处理 HTTP Range 播放请求 (边下边解边播的核心接口)
    */
-  async getStreamingPlan(vid, quality, signal, minValidityMs = 0, nextVids = []) {
+  async getStreamingPlan(vid, quality, signal, minValidityMs = 0, nextVids = [], progressive = false) {
     const key = `${vid}:${quality}`;
     const cached = this.plans.get(key);
     if (cached?.expires > Date.now() + minValidityMs) { this.plans.delete(key); this.plans.set(key, cached); return cached.plan; }
     const t0 = Date.now();
     logger.info('StreamService', `开始构建流式分片播放计划: vid=${vid}, quality=${quality}`);
     const info = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, allowBytevc2: true, signal, nextVids });
-    if (info.codec === 'bytevc2') return null;
+    if (info.codec === 'bytevc2') return progressive && Number.isFinite(info.duration) && info.duration > 0 && info.duration <= 86400 ? { bytevc2: true, info } : null;
     let lastError;
     let hasRangeUnsupported = false;
     const rawVariants = info.variants?.length ? info.variants : [info];
@@ -455,6 +458,7 @@ class StreamService {
         this.plans.delete(planKey);
         this.plans.delete(String(vid));
         this.cache.delete(planKey);
+        this.fragmentCache.delete(planKey);
         this.cache.delete(String(vid));
         this.quickAborts.delete(planKey);
         appSource.clearEntryCache?.(vid);
@@ -481,8 +485,58 @@ class StreamService {
         logger.info('StreamService', `命中完整视频内存缓存，直接进入缓冲分片播放: vid=${vid}, quality=${quality}`);
         return await this.handleBufferedStream(req, res, vid);
       }
-      const plan = await this.getStreamingPlan(vid, quality, controller.signal, 0, nextVids);
+      const cachedFragment = this.fragmentCache.get(planKey);
+      if (cachedFragment && (req.query?.mse === '1' || req.query?.mse === 'stream')) {
+        this.fragmentCache.delete(planKey);
+        this.fragmentCache.set(planKey, cachedFragment);
+        if (req.query.mse === 'stream') {
+          res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': cachedFragment.buffer.length, 'Cache-Control': 'no-store' });
+          res.end(cachedFragment.buffer);
+        } else {
+          res.writeHead(409, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Stream-Mode': 'bytevc2-progressive' });
+          res.end(JSON.stringify({ code: 'BYTEVC2_PROGRESSIVE', duration: cachedFragment.duration }));
+        }
+        return;
+      }
+      const progressive = req.query?.mse === '1' || req.query?.mse === 'stream';
+      const plan = await this.getStreamingPlan(vid, quality, controller.signal, 0, nextVids, progressive);
       if (!plan) return await this.handleBufferedStream(req, res, vid);
+      if (plan.bytevc2) {
+        if (req.query?.mse !== 'stream') {
+          res.writeHead(409, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Stream-Mode': 'bytevc2-progressive' });
+          res.end(JSON.stringify({ code: 'BYTEVC2_PROGRESSIVE', duration: plan.info.duration }));
+          return;
+        }
+        if (req.method === 'HEAD') { res.writeHead(405); res.end(); return; }
+        const existing = this.inFlight.get(planKey);
+        if (existing?.background) existing.controller.abort(new Error('Progressive playback started'));
+        const { buffer, variant } = await this.downloadFastestMedia(plan.info.variants, plan.info, 25000, controller.signal);
+        const rawKey = variant.contentKey || plan.info.contentKey;
+        const key = Buffer.isBuffer(rawKey) ? rawKey : Buffer.from(rawKey || '', 'hex');
+        res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' });
+        const service = this;
+        async function* collectFragments() {
+          const started = Date.now();
+          let size = 0;
+          let chunks = [];
+          for await (const chunk of service.progressiveTranscode(buffer, key, controller.signal)) {
+            if (!size) logger.info('StreamService', `[ByteVC2] 首批转换数据就绪: vid=${vid}, 耗时=${Date.now() - started}ms`);
+            size += chunk.length;
+            if (chunks && size <= 64 * 1024 * 1024) chunks.push(chunk);
+            else chunks = null;
+            yield chunk;
+          }
+          if (chunks && !controller.signal.aborted) {
+            service.fragmentCache.set(planKey, { buffer: Buffer.concat(chunks, size), duration: plan.info.duration });
+            while (service.fragmentCache.size > 2 || [...service.fragmentCache.values()].reduce((n, item) => n + item.buffer.length, 0) > 64 * 1024 * 1024) {
+              service.fragmentCache.delete(service.fragmentCache.keys().next().value);
+            }
+          }
+          logger.info('StreamService', `[ByteVC2] 分片转换完成: vid=${vid}, 输出=${size} 字节, 耗时=${Date.now() - started}ms`);
+        }
+        await pipeline(Readable.from(collectFragments(), { objectMode: false }), res);
+        return;
+      }
       const total = plan.size;
       let start = 0, end = total - 1;
       if (req.headers.range) {

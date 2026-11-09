@@ -67,4 +67,48 @@ async function transcodeBytevc2(buffer, key, signal) {
     await fs.rm(dir, { recursive: true, force: true });
   }
 }
-module.exports = { binaryPath, transcodeBytevc2 };
+async function* streamBytevc2(buffer, key, signal) {
+  signal?.throwIfAborted();
+  if (!Buffer.isBuffer(key) || ![0, 16].includes(key.length)) throw new Error('ByteVC2 片源密钥无效');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hongguo-bvc2-stream-'));
+  let child;
+  let completion;
+  let timer;
+  let abort;
+  try {
+    const input = path.join(dir, 'input.mp4');
+    await fs.writeFile(input, buffer, { mode: 0o600, signal });
+    child = spawn(binaryPath(), ['-hide_banner', '-loglevel', 'error', '-nostdin',
+      ...(key.length ? ['-decryption_key', key.toString('hex')] : []),
+      '-i', input, '-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '25',
+      '-pix_fmt', 'yuv420p', '-g', '30', '-c:a', 'aac', '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      '-f', 'mp4', 'pipe:1'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let errors = '';
+    child.stderr.on('data', data => { if (errors.length < 4096) errors += data.toString().slice(0, 4096 - errors.length); });
+    completion = new Promise(resolve => {
+      child.once('error', error => resolve({ error }));
+      child.once('close', code => resolve({ code }));
+    });
+    abort = () => child.kill();
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    timer = setTimeout(abort, 5 * 60 * 1000);
+    timer.unref?.();
+    let size = 0;
+    for await (const chunk of child.stdout) {
+      signal?.throwIfAborted();
+      size += chunk.length;
+      if (size > 128 * 1024 * 1024) throw new Error('ByteVC2 视频转换结果过大');
+      yield chunk;
+    }
+    const result = await completion;
+    signal?.throwIfAborted();
+    if (result.error || result.code !== 0 || !size) throw Object.assign(new Error('ByteVC2 视频转换失败'), { code: 'BYTEVC2_TRANSCODE_FAILED', detail: errors });
+  } finally {
+    clearTimeout(timer);
+    if (abort) signal?.removeEventListener('abort', abort);
+    if (child) { child.kill(); await completion; }
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+module.exports = { binaryPath, transcodeBytevc2, streamBytevc2 };
