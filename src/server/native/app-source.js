@@ -453,7 +453,10 @@ async function fetchAppPlayUrl(vid, options = {}) {
         signal.throwIfAborted();
         if (err.code === 'EMPTY_RESPONSE' && typeof getPlaybackDevice.reset === 'function') {
             logger.warn('AppSource', 'App 接口返回空响应，尝试更新播放设备并重试...');
-            getPlaybackDevice.reset(device);
+            const didReset = getPlaybackDevice.reset(device);
+            if (!didReset) {
+                await new Promise(resolve => setTimeout(resolve, 250));
+            }
             signed = playbackRequest(payload, await getPlaybackDevice(execRequestJson, signal));
             response = await execRequestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
         } else {

@@ -6,10 +6,82 @@
 // Changes: fixed anonymous phone profile; process-only identity; no cookies or tokens.
 const crypto = require('node:crypto');
 const { gzipSync } = require('node:zlib');
+const path = require('node:path');
+const fs = require('node:fs');
 const logger = require('../services/logger');
 
 const REGISTER_URL = 'https://log5-applog-lf.fqnovel.com/service/2/device_register/?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
 const KDF_SALT = Buffer.from('4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
+const DEFAULT_COOLDOWN_MS = 60000; // 连续重置设备冷却时间（毫秒）
+
+function getDefaultDeviceFilePath() {
+    const dir = process.env.HONGGUO_DATA_DIR || path.join(__dirname, '../../../data');
+    return process.env.HONGGUO_DEVICE_FILE || path.join(dir, 'device.json');
+}
+
+function isValidDevice(device) {
+    return Boolean(
+        device && typeof device === 'object' &&
+        typeof device.device_id === 'string' && /^\d{1,30}$/.test(device.device_id) && /[1-9]/.test(device.device_id) &&
+        typeof device.iid === 'string' && /^\d{1,30}$/.test(device.iid) && /[1-9]/.test(device.iid) &&
+        typeof device.cdid === 'string' && /^[a-f0-9-]{36}$/i.test(device.cdid)
+    );
+}
+
+function loadDeviceFile(filePath, maxAgeMs = 30 * 24 * 60 * 60 * 1000) {
+    if (!filePath) return null;
+    try {
+        if (!fs.existsSync(filePath)) return null;
+        const raw = fs.readFileSync(filePath, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (isValidDevice(parsed)) {
+            if (Number.isFinite(parsed.registered_at) && maxAgeMs > 0) {
+                if (Date.now() - parsed.registered_at > maxAgeMs) {
+                    logger.info('PlaybackDevice', '本地设备凭据已超过建议有效期，准备重新注册');
+                    return null;
+                }
+            }
+            return Object.freeze({
+                device_id: parsed.device_id,
+                iid: parsed.iid,
+                cdid: parsed.cdid,
+            });
+        }
+    } catch (err) {
+        logger.warn('PlaybackDevice', `读取本地设备凭据失败: ${err.message}`);
+    }
+    return null;
+}
+
+function saveDeviceFile(filePath, device) {
+    if (!filePath || !isValidDevice(device)) return;
+    try {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        const data = {
+            device_id: device.device_id,
+            iid: device.iid,
+            cdid: device.cdid,
+            registered_at: Date.now(),
+            updated_at: new Date().toISOString(),
+        };
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), { flag: 'w', mode: 0o600 });
+        logger.info('PlaybackDevice', `已持久化匿名设备凭据至 ${filePath}`);
+    } catch (err) {
+        logger.warn('PlaybackDevice', `保存本地设备凭据失败: ${err.message}`);
+    }
+}
+
+function removeDeviceFile(filePath) {
+    if (!filePath) return;
+    try {
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            logger.info('PlaybackDevice', `已移除本地持久化设备凭据: ${filePath}`);
+        }
+    } catch (err) {
+        logger.warn('PlaybackDevice', `移除本地设备凭据失败: ${err.message}`);
+    }
+}
 
 function responseId(response, name) {
     const preferred = response?.[`${name}_str`];
@@ -81,15 +153,30 @@ function waitForRegistration(promise, signal) {
     });
 }
 
-function createPlaybackDeviceRegistrar() {
+function createPlaybackDeviceRegistrar(options = {}) {
     let registration;
     let request;
     let currentDevice;
+    let lastResetTime = 0;
+    const deviceFile = options.deviceFile !== undefined ? options.deviceFile : null;
+    const cooldownMs = Number.isFinite(options.cooldownMs) ? options.cooldownMs : 0;
+    const maxAgeMs = Number.isFinite(options.maxAgeMs) ? options.maxAgeMs : 30 * 24 * 60 * 60 * 1000;
+
+    if (deviceFile) {
+        const saved = loadDeviceFile(deviceFile, maxAgeMs);
+        if (saved) {
+            currentDevice = saved;
+            logger.info('PlaybackDevice', `已加载本地持久化设备: device_id=${saved.device_id}, iid=${saved.iid}`);
+        }
+    }
+
     const registrar = function getPlaybackDevice(requestJson, signal) {
         if (signal?.aborted) return Promise.reject(signal.reason);
+        if (currentDevice) return Promise.resolve(currentDevice);
         // Concurrent playback/search requests share registration. Retries reuse the
         // same encrypted payload and identity, including after an exhausted attempt.
         registration ||= Promise.resolve().then(async () => {
+            if (currentDevice) return currentDevice;
             request ||= createRegistrationRequest();
             logger.info('PlaybackDevice', `开始匿名设备注册, cdid=${request.cdid}`);
             const deadline = Date.now() + 8000;
@@ -106,7 +193,11 @@ function createPlaybackDeviceRegistrar() {
                     const iid = responseId(response, 'install_id');
                     if (!device_id || !iid) throw Object.assign(new Error('Invalid registration'), { code: 'INVALID_REGISTRATION' });
                     logger.info('PlaybackDevice', `匿名设备注册成功: device_id=${device_id}, iid=${iid}`);
-                    return currentDevice = Object.freeze({ device_id, iid, cdid: request.cdid });
+                    currentDevice = Object.freeze({ device_id, iid, cdid: request.cdid });
+                    if (deviceFile) {
+                        saveDeviceFile(deviceFile, currentDevice);
+                    }
+                    return currentDevice;
                 } catch (error) {
                     if (attempt === 2 || !retryable(error) || Date.now() >= deadline) throw error;
                     await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
@@ -122,16 +213,41 @@ function createPlaybackDeviceRegistrar() {
         });
         return waitForRegistration(registration, signal);
     };
-    registrar.reset = function resetPlaybackDevice(expectedDevice) {
+
+    registrar.reset = function resetPlaybackDevice(expectedDevice, force = false) {
         // A late failure from an old request must not discard a newer registration.
         if (expectedDevice && currentDevice !== expectedDevice) return false;
+        const now = Date.now();
+        if (!force && cooldownMs > 0 && lastResetTime > 0 && (now - lastResetTime < cooldownMs)) {
+            logger.warn('PlaybackDevice', `设备重置处于冷却期内（剩余 ${Math.ceil((cooldownMs - (now - lastResetTime)) / 1000)} 秒），跳过重置`);
+            return false;
+        }
+        lastResetTime = now;
         registration = undefined;
         request = undefined;
         currentDevice = undefined;
+        if (deviceFile) {
+            removeDeviceFile(deviceFile);
+        }
         return true;
     };
+
+    registrar.getDeviceFile = () => deviceFile;
+    registrar.getCurrentDevice = () => currentDevice;
     return registrar;
 }
 
-const getPlaybackDevice = createPlaybackDeviceRegistrar();
-module.exports = { getPlaybackDevice, createPlaybackDeviceRegistrar };
+const getPlaybackDevice = createPlaybackDeviceRegistrar({
+    deviceFile: getDefaultDeviceFilePath(),
+    cooldownMs: DEFAULT_COOLDOWN_MS,
+});
+
+module.exports = {
+    getPlaybackDevice,
+    createPlaybackDeviceRegistrar,
+    getDefaultDeviceFilePath,
+    isValidDevice,
+    loadDeviceFile,
+    saveDeviceFile,
+    removeDeviceFile,
+};
