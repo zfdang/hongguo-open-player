@@ -14,7 +14,7 @@ function binaryPath() {
 
 async function transcodeBytevc2(buffer, key, signal) {
   signal?.throwIfAborted();
-  if (!Buffer.isBuffer(key) || key.length !== 16) throw new Error('ByteVC2 片源密钥无效');
+  if (!Buffer.isBuffer(key) || ![0, 16].includes(key.length)) throw new Error('ByteVC2 片源密钥无效');
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hongguo-bvc2-'));
   const input = path.join(dir, 'input.mp4');
   const output = path.join(dir, 'output.mp4');
@@ -32,7 +32,8 @@ async function transcodeBytevc2(buffer, key, signal) {
         signal?.removeEventListener('abort', abort);
         error ? reject(error) : resolve();
       };
-      const child = spawn(binaryPath(), ['-hide_banner', '-loglevel', 'error', '-nostdin', '-decryption_key', key.toString('hex'),
+      const child = spawn(binaryPath(), ['-hide_banner', '-loglevel', 'error', '-nostdin',
+        ...(key.length ? ['-decryption_key', key.toString('hex')] : []),
         '-i', input, '-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '25',
         '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', '-y', output],
       { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
