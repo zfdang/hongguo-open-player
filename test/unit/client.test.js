@@ -1250,3 +1250,176 @@ test('video error handler provides specific guidance for MediaError code 2 strea
   state.onVideoError();
   assert.equal(state.videoErrorMessage.value, '视频流读取中断（网络或取流异常）；请点击“重试本集”或切换分集');
 });
+
+test('parseSeasonInfo correctly parses Chinese, Arabic numbers, suffixes and brackets', () => {
+  const state = client(async () => response({}));
+  const p1 = state.parseSeasonInfo('万妖图录传第一季');
+  assert.equal(p1.baseTitle, '万妖图录传');
+  assert.equal(p1.seasonNum, 1);
+  assert.equal(p1.seasonLabel, '第1季');
+  assert.equal(p1.isExplicit, true);
+
+  const p14 = state.parseSeasonInfo('万妖图录传第十四季');
+  assert.equal(p14.baseTitle, '万妖图录传');
+  assert.equal(p14.seasonNum, 14);
+  assert.equal(p14.seasonLabel, '第14季');
+
+  const p2 = state.parseSeasonInfo('全球死考：刚下刑场你让我去考试二季');
+  assert.equal(p2.baseTitle, '全球死考：刚下刑场你让我去考试');
+  assert.equal(p2.seasonNum, 2);
+
+  const p3 = state.parseSeasonInfo('持械入宋 第3部');
+  assert.equal(p3.baseTitle, '持械入宋');
+  assert.equal(p3.seasonNum, 3);
+
+  const pPlain = state.parseSeasonInfo('万妖图录传');
+  assert.equal(pPlain.baseTitle, '万妖图录传');
+  assert.equal(pPlain.seasonNum, 1);
+  assert.equal(pPlain.isExplicit, false);
+
+  const pSeason = state.parseSeasonInfo('大唐荣耀 (Season 5)');
+  assert.equal(pSeason.baseTitle, '大唐荣耀');
+  assert.equal(pSeason.seasonNum, 5);
+});
+
+test('fetchRelatedSeasons retrieves all seasons, deduplicates and sorts ascending 1 to N', async () => {
+  const searchResultsPage1 = [
+    { series_id: '10', series_title: '万妖图录传第十季', total: 80 },
+    { series_id: '1', series_title: '万妖图录传第一季', total: 80 },
+    { series_id: '14', series_title: '万妖图录传第十四季', total: 80 },
+    { series_id: '2', series_title: '万妖图录传第二季', total: 80 },
+    { series_id: '3', series_title: '万妖图录传第三季', total: 80 },
+    { series_id: '4', series_title: '万妖图录传第四季', total: 80 },
+    { series_id: '5', series_title: '万妖图录传第五季', total: 80 },
+    { series_id: '6', series_title: '万妖图录传第六季', total: 80 },
+    { series_id: '7', series_title: '万妖图录传第七季', total: 80 },
+    { series_id: '8', series_title: '万妖图录传第八季', total: 80 }
+  ];
+  const searchResultsPage2 = [
+    { series_id: '8', series_title: '万妖图录传第八季', total: 80 }, // Duplicate from upstream
+    { series_id: '9', series_title: '万妖图录传第九季', total: 80 },
+    { series_id: '11', series_title: '万妖图录传第十一季', total: 80 },
+    { series_id: '12', series_title: '万妖图录传第十二季', total: 80 },
+    { series_id: '13', series_title: '万妖图录传第十三季', total: 80 },
+    { series_id: '999', series_title: '无关的短剧', total: 50 } // Should be filtered out
+  ];
+
+  const state = client(async (url) => {
+    if (url.includes('page=1')) return response({ results: searchResultsPage1, hasMore: true });
+    if (url.includes('page=2')) return response({ results: searchResultsPage2, hasMore: false });
+    if (url.startsWith('/api/series/')) {
+      const id = url.split('/').pop();
+      return response({
+        series_id: id,
+        series_title: '万妖图录传第' + id + '季',
+        episodes: [{ vid: id + '_1', vid_index: 1 }]
+      });
+    }
+    return response({});
+  });
+
+  await state.openTheater({ series_id: '1', series_title: '万妖图录传第一季' });
+  await state.fetchRelatedSeasons(state.activeSeries.value);
+
+  assert.equal(state.seriesBaseTitle.value, '万妖图录传');
+  assert.equal(state.relatedSeasons.value.length, 14);
+
+  // Assert strictly ascending sorted order: Season 1 to Season 14
+  for (let i = 0; i < 14; i++) {
+    assert.equal(state.relatedSeasons.value[i].seasonNum, i + 1);
+  }
+});
+
+test('selectSeason switches active drama in theater, closes modal and resets sidebar tab', async () => {
+  let theaterOpenedWith = null;
+  const state = client(async (url) => {
+    if (url.startsWith('/api/series/')) {
+      const id = url.split('/').pop();
+      theaterOpenedWith = id;
+      return response({
+        series_id: id,
+        series_title: '剧集第' + id + '季',
+        episodes: [{ vid: id + '_1', vid_index: 1 }]
+      });
+    }
+    return response({ results: [] });
+  });
+
+  state.activeSeries.value = { series_id: '1' };
+  state.showSeasonsModal.value = true;
+  state.sidebarTab.value = 'seasons';
+
+  await state.selectSeason({ series_id: '2', series_title: '剧集第二季' });
+
+  assert.equal(theaterOpenedWith, '2');
+  assert.equal(state.showSeasonsModal.value, false);
+  assert.equal(state.sidebarTab.value, 'episodes');
+});
+
+test('searchSeriesGlobally closes modal, exits theater and initiates search', async () => {
+  let searchHandled = false;
+  const state = client(async (url) => {
+    if (url.startsWith('/api/search')) {
+      searchHandled = true;
+      return response({ results: [] });
+    }
+    return response({});
+  });
+
+  state.viewMode.value = 'theater';
+  state.showSeasonsModal.value = true;
+  state.seriesBaseTitle.value = '万妖图录传';
+
+  state.searchSeriesGlobally('万妖图录传');
+
+  assert.equal(state.showSeasonsModal.value, false);
+  assert.equal(state.viewMode.value, 'catalog');
+  assert.equal(state.searchKeyword.value, '万妖图录传');
+  assert.equal(state.currentTab.value, 'search');
+});
+
+test('copyDramaTitle copies title to clipboard and gives feedback', async () => {
+  let clipboardText = '';
+  const state = client(async () => response({}), {
+    navigator: {
+      userAgent: '',
+      clipboard: {
+        writeText: async (t) => { clipboardText = t; }
+      }
+    }
+  });
+
+  state.activeSeries.value = { series_title: '万妖图录传第一季' };
+  await state.copyDramaTitle();
+
+  assert.equal(clipboardText, '万妖图录传第一季');
+  assert.equal(state.titleCopied.value, true);
+});
+
+test('index.html and app.css include multi-season navigation and text selection styles', () => {
+  const path = require('node:path');
+  const html = fs.readFileSync(path.resolve(__dirname, '../../src/client/index.html'), 'utf-8');
+  const css = fs.readFileSync(path.resolve(__dirname, '../../src/client/css/app.css'), 'utf-8');
+
+  // Verify series seasons button and icon in sidebar header
+  assert.ok(html.includes('sidebar-seasons-btn'), 'sidebar-seasons-btn must be present in index.html');
+  assert.ok(html.includes('📚'), 'Book icon must be used');
+  assert.ok(html.includes('系列全季'), 'Label must include 系列全季');
+
+  // Verify sidebar view tabs and seasons panel
+  assert.ok(html.includes('sidebar-view-tabs'), 'sidebar-view-tabs must be present');
+  assert.ok(html.includes('sidebar-seasons-panel'), 'sidebar-seasons-panel must be present');
+
+  // Verify copy title button in drama modal
+  assert.ok(html.includes('modal-copy-btn'), 'modal-copy-btn must be present');
+  assert.ok(html.includes('copyDramaTitle'), 'copyDramaTitle method must be bound');
+
+  // Verify full seasons modal dialog
+  assert.ok(html.includes('seasons-modal'), 'seasons-modal must be present');
+  assert.ok(html.includes('showSeasonsModal'), 'showSeasonsModal state must control modal');
+
+  // Verify CSS enables text selection for modals and descriptions
+  assert.ok(css.includes('user-select: text'), 'app.css must allow text selection');
+  assert.ok(css.includes('.drama-modal'), 'drama-modal must be styled for selectable text');
+  assert.ok(css.includes('.seasons-modal'), 'seasons-modal styles must exist');
+});

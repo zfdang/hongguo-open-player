@@ -453,6 +453,21 @@
                 <div v-if="activeSeries?.tags && activeSeries.tags.length" class="sidebar-tags-row">
                   <span v-for="tag in activeSeries.tags.slice(0, 3)" :key="tag" class="sidebar-tag-pill">{{ tag }}</span>
                 </div>
+                <!-- 📚 系列全季按钮 (红圈位置) -->
+                <div v-if="relatedSeasons.length > 0 || isCheckingSeasons" class="sidebar-seasons-row">
+                  <button 
+                    type="button"
+                    class="sidebar-seasons-btn" 
+                    :class="{ loading: isCheckingSeasons }"
+                    @click.stop="openSeasonsModal"
+                    :title="isCheckingSeasons && relatedSeasons.length === 0 ? '正在获取系列各季...' : ('点击查看《' + seriesBaseTitle + '》系列全季 (' + relatedSeasons.length + ' 季)')"
+                  >
+                    <span class="seasons-btn-icon">📚</span>
+                    <span class="seasons-btn-text">
+                      {{ isCheckingSeasons && relatedSeasons.length === 0 ? '系列各季...' : ('系列全季 (' + relatedSeasons.length + ')') }}
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -465,34 +480,91 @@
             </div>
           </div>
 
-          <!-- 分集选项卡分页 (每组 30 集) -->
-          <div class="episode-group-tabs">
+          <!-- 侧边栏视图切换 Tab: [选集] vs [📚 系列全季] (仅当有多季短剧时展示) -->
+          <div v-if="relatedSeasons.length > 1" class="sidebar-view-tabs">
             <button 
-              v-for="group in episodeGroups" 
-              :key="group.start"
-              class="group-tab-item"
-              :class="{ active: currentGroup.start === group.start }"
-              @click="currentGroup = group"
+              type="button"
+              class="sidebar-view-tab" 
+              :class="{ active: sidebarTab === 'episodes' }"
+              @click="sidebarTab = 'episodes'"
             >
-              {{ group.start }}-{{ group.end }}
+              <span>选集 ({{ activeEpisodes.length }})</span>
+            </button>
+            <button 
+              type="button"
+              class="sidebar-view-tab" 
+              :class="{ active: sidebarTab === 'seasons' }"
+              @click="sidebarTab = 'seasons'"
+            >
+              <span>📚 系列全季 ({{ relatedSeasons.length }})</span>
             </button>
           </div>
 
-          <!-- 分集按钮方块网格 -->
-          <div class="episode-grid">
-            <button 
-              v-for="ep in currentGroupEpisodes" 
-              :key="ep.vid"
-              class="episode-btn"
-              :class="{ 
-                active: ep.vid_index === activeEpisodeIndex,
-                watched: isEpisodeWatched(ep.vid_index)
-              }"
-              @click="switchEpisode(ep)"
-            >
-              <span v-if="ep.vid_index === activeEpisodeIndex" class="eq-icon">▶</span>
-              <span class="ep-num">{{ ep.vid_index }}</span>
-            </button>
+          <!-- 模式一: 分集列表 -->
+          <div v-show="sidebarTab === 'episodes'" class="sidebar-episodes-panel">
+            <!-- 分集选项卡分页 (每组 30 集) -->
+            <div class="episode-group-tabs">
+              <button 
+                v-for="group in episodeGroups" 
+                :key="group.start"
+                class="group-tab-item"
+                :class="{ active: currentGroup.start === group.start }"
+                @click="currentGroup = group"
+              >
+                {{ group.start }}-{{ group.end }}
+              </button>
+            </div>
+
+            <!-- 分集按钮方块网格 -->
+            <div class="episode-grid">
+              <button 
+                v-for="ep in currentGroupEpisodes" 
+                :key="ep.vid"
+                class="episode-btn"
+                :class="{ 
+                  active: ep.vid_index === activeEpisodeIndex,
+                  watched: isEpisodeWatched(ep.vid_index)
+                }"
+                @click="switchEpisode(ep)"
+              >
+                <span v-if="ep.vid_index === activeEpisodeIndex" class="eq-icon">▶</span>
+                <span class="ep-num">{{ ep.vid_index }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 模式二: 侧栏系列全季面板 (按季排好序) -->
+          <div v-show="sidebarTab === 'seasons'" class="sidebar-seasons-panel">
+            <div class="sidebar-seasons-panel-header">
+              <span class="panel-header-title">已按剧集顺序排好序</span>
+              <button type="button" class="panel-expand-btn" @click="openSeasonsModal" title="弹窗大图浏览">⛶ 弹窗大图</button>
+            </div>
+            <div class="sidebar-seasons-list">
+              <div 
+                v-for="season in relatedSeasons" 
+                :key="season.series_id"
+                class="sidebar-season-item"
+                :class="{ active: season.series_id === activeSeries?.series_id }"
+                @click="selectSeason(season)"
+                :title="'切换播放: ' + season.series_title"
+              >
+                <div class="season-item-cover-wrap">
+                  <img :src="season.cover" class="season-item-cover" @error="onImageError" :alt="season.series_title" />
+                  <span class="season-item-num-tag">{{ season.seasonLabel }}</span>
+                </div>
+                <div class="season-item-info">
+                  <div class="season-item-title-row">
+                    <span class="season-item-title" :title="season.series_title">{{ season.series_title }}</span>
+                    <span v-if="season.series_id === activeSeries?.series_id" class="season-item-active-badge">播放中</span>
+                  </div>
+                  <div class="season-item-meta">
+                    <span v-if="season.total" class="season-item-total">共 {{ season.total }} 集</span>
+                    <span v-if="season.social_info?.hot_text" class="season-item-hot">🔥 {{ season.social_info.hot_text }}</span>
+                    <span v-if="season.social_info?.rating" class="season-item-rating">⭐ {{ season.social_info.rating }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </aside>
       </div>
@@ -613,7 +685,19 @@
             <img :src="activeSeries.cover" :alt="activeSeries.series_title" class="drama-detail-cover" referrerpolicy="no-referrer" @error="onImageError" />
             <div class="drama-detail-meta">
               <div class="drama-detail-title-row">
-                <h2 class="drama-detail-title">{{ activeSeries.series_title }}</h2>
+                <div class="drama-detail-title-group">
+                  <h2 class="drama-detail-title">{{ activeSeries.series_title }}</h2>
+                  <button 
+                    type="button" 
+                    class="modal-copy-btn" 
+                    @click="copyDramaTitle" 
+                    :title="'复制剧名: ' + activeSeries.series_title"
+                    aria-label="复制剧名"
+                  >
+                    <span class="copy-btn-icon">{{ titleCopied ? '✓' : '📋' }}</span>
+                    <span class="copy-btn-text">{{ titleCopied ? '已复制' : '复制剧名' }}</span>
+                  </button>
+                </div>
                 <button class="drama-detail-fav-btn" :class="{ favorited: isFavorited }" @click="toggleFavCurrent">
                   {{ isFavorited ? '❤️ 已在收藏夹' : '🤍 加入收藏' }}
                 </button>
@@ -638,6 +722,28 @@
           <button class="modal-close-btn" @click="closeDramaDetail" title="关闭 (Esc)">✕</button>
         </div>
         <div class="drama-modal-body">
+          <!-- 系列全季快速切换 (已排好序) -->
+          <div v-if="relatedSeasons.length > 1" class="drama-seasons-section">
+            <div class="drama-seasons-head">
+              <h4 class="intro-heading">📚 系列全季 ({{ relatedSeasons.length }})</h4>
+              <button type="button" class="seasons-expand-link" @click="openSeasonsModalFromDetail">查看全季卡片 ↗</button>
+            </div>
+            <div class="drama-seasons-chips">
+              <button 
+                v-for="s in relatedSeasons" 
+                :key="s.series_id"
+                type="button"
+                class="drama-season-chip"
+                :class="{ active: s.series_id === activeSeries?.series_id }"
+                @click="selectSeason(s)"
+                :title="s.series_title"
+              >
+                <span class="chip-season-label">{{ s.seasonLabel }}</span>
+                <span v-if="s.series_id === activeSeries?.series_id" class="chip-playing-dot">●</span>
+              </button>
+            </div>
+          </div>
+
           <div class="drama-intro-section">
             <h4 class="intro-heading">📖 剧情简介</h4>
             <div class="drama-intro-content">
@@ -670,6 +776,79 @@
         </div>
         <div class="drama-modal-footer">
           <button class="drama-continue-btn" @click="closeDramaDetail">继续播放</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 系列全季对话框 (支持按季排序选看、切换播放与全网搜索) -->
+    <div v-if="showSeasonsModal" class="seasons-modal-overlay" @click.self="closeSeasonsModal" @keydown="onSeasonsModalKeydown">
+      <div class="seasons-modal" role="dialog" aria-modal="true" tabindex="-1" :aria-label="'《' + seriesBaseTitle + '》系列全季'">
+        <div class="seasons-modal-header">
+          <div class="seasons-header-main">
+            <div class="seasons-header-title-row">
+              <span class="seasons-header-icon">📚</span>
+              <h3 class="seasons-header-title">《{{ seriesBaseTitle }}》系列全季</h3>
+              <span v-if="relatedSeasons.length" class="seasons-count-tag">共 {{ relatedSeasons.length }} 季 · 已排好序</span>
+            </div>
+            <p class="seasons-header-subtitle">支持按季直接选看，点击任意一季即刻无缝换季播放</p>
+          </div>
+          <button class="modal-close-btn" @click="closeSeasonsModal" title="关闭 (Esc)">✕</button>
+        </div>
+
+        <div class="seasons-modal-body">
+          <div v-if="isCheckingSeasons && relatedSeasons.length === 0" class="seasons-loading">
+            <div class="spinner"></div>
+            <span>正在检索系列全部季目...</span>
+          </div>
+
+          <div v-else-if="relatedSeasons.length === 0" class="seasons-empty">
+            <p>未找到其他季短剧</p>
+            <button type="button" class="seasons-search-action-btn" @click="searchSeriesGlobally(seriesBaseTitle)">
+              🔍 在全站搜索“{{ seriesBaseTitle }}”
+            </button>
+          </div>
+
+          <div v-else class="seasons-grid">
+            <div 
+              v-for="season in relatedSeasons" 
+              :key="season.series_id"
+              class="season-card"
+              :class="{ 'current-playing': season.series_id === activeSeries?.series_id }"
+              @click="selectSeason(season)"
+              :title="'点击播放: ' + season.series_title"
+              role="button"
+              tabindex="0"
+              @keydown.enter="selectSeason(season)"
+            >
+              <div class="season-card-poster">
+                <img :src="season.cover" class="season-poster-img" @error="onImageError" :alt="season.series_title" />
+                <span class="season-badge-pill">{{ season.seasonLabel }}</span>
+                <div v-if="season.series_id === activeSeries?.series_id" class="season-playing-overlay">
+                  <span class="playing-pulse-dot"></span>
+                  <span>正在播放</span>
+                </div>
+                <div v-else class="season-play-hover-hint">
+                  <span class="play-icon">▶</span>
+                  <span class="play-text">播放此季</span>
+                </div>
+              </div>
+              <div class="season-card-meta">
+                <h4 class="season-card-title" :title="season.series_title">{{ season.series_title }}</h4>
+                <div class="season-card-tags">
+                  <span v-if="season.total" class="season-card-episodes">共 {{ season.total }} 集</span>
+                  <span v-if="season.social_info?.hot_text" class="season-card-hot">🔥 {{ season.social_info.hot_text }}</span>
+                  <span v-if="season.social_info?.rating" class="season-card-rating">⭐ {{ season.social_info.rating }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="seasons-modal-footer">
+          <button type="button" class="seasons-search-fallback-btn" @click="searchSeriesGlobally(seriesBaseTitle)">
+            🔍 在全站搜索“{{ seriesBaseTitle }}”全部短剧
+          </button>
+          <button type="button" class="seasons-close-footer-btn" @click="closeSeasonsModal">关闭</button>
         </div>
       </div>
     </div>

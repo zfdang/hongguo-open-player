@@ -88,6 +88,15 @@ createApp({
     const previewPercent = ref(0);
     const showPreview = ref(false);
     const showDramaDetailModal = ref(false);
+    const relatedSeasons = ref([]);
+    const isCheckingSeasons = ref(false);
+    const seriesBaseTitle = ref('');
+    const showSeasonsModal = ref(false);
+    const sidebarTab = ref('episodes'); // 'episodes' | 'seasons'
+    const titleCopied = ref(false);
+    let titleCopiedTimer = null;
+    const seasonsCache = new Map();
+    let currentSeasonsRequest = 0;
     const showAppMenu = ref(false);
     const danmakuEnabled = ref(true);
     const showDanmakuSettings = ref(false);
@@ -881,6 +890,244 @@ createApp({
       e.target.src = '/assets/app-icon.png';
     }
 
+    async function copyToClipboard(text, successMsg) {
+      if (!text) return false;
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(text);
+        } else if (typeof document !== 'undefined' && typeof document.createElement === 'function' && document.body) {
+          const el = document.createElement('textarea');
+          el.value = text;
+          el.style.position = 'fixed';
+          el.style.opacity = '0';
+          document.body.appendChild(el);
+          el.select();
+          if (typeof document.execCommand === 'function') {
+            document.execCommand('copy');
+          }
+          document.body.removeChild(el);
+        }
+        notify(successMsg || '已复制到剪贴板');
+        return true;
+      } catch (err) {
+        console.warn('复制失败:', err);
+        notify('复制失败，请手动选中文本复制');
+        return false;
+      }
+    }
+
+    async function copyDramaTitle() {
+      const title = activeSeries.value?.series_title || '';
+      if (!title) return;
+      const ok = await copyToClipboard(title, `已复制剧名: 《${title}》`);
+      if (ok) {
+        titleCopied.value = true;
+        clearTimeout(titleCopiedTimer);
+        titleCopiedTimer = setTimeout(() => { titleCopied.value = false; }, 2000);
+      }
+    }
+
+    const CHINESE_NUMS = {
+      '零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4,
+      '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10
+    };
+
+    function parseChineseNumber(str) {
+      if (!str) return null;
+      str = String(str).trim();
+      if (/^\d+$/.test(str)) return parseInt(str, 10);
+      if (str.length === 1 && CHINESE_NUMS[str] !== undefined) return CHINESE_NUMS[str];
+      if (str === '十') return 10;
+      if (str.length === 2) {
+        if (str[0] === '十' && CHINESE_NUMS[str[1]] !== undefined) return 10 + CHINESE_NUMS[str[1]];
+        if (CHINESE_NUMS[str[0]] !== undefined && str[1] === '十') return CHINESE_NUMS[str[0]] * 10;
+      }
+      if (str.length === 3 && CHINESE_NUMS[str[0]] !== undefined && str[1] === '十' && CHINESE_NUMS[str[2]] !== undefined) {
+        return CHINESE_NUMS[str[0]] * 10 + CHINESE_NUMS[str[2]];
+      }
+      return null;
+    }
+
+    const SEASON_PATTERNS = [
+      /[（(【\s]*第\s*([0-9零一二两三四五六七八九十]+)\s*(?:季|部|期|辑)[）)】\s]*$/i,
+      /[（(【\s]*([0-9零一二两三四五六七八九十]+)\s*(?:季|部|期|辑)[）)】\s]*$/i,
+      /[（(【\s]*(?:Season|S)\s*([0-9]+)[）)】\s]*$/i,
+      /[（(【]\s*([0-9]+)\s*[）)】]$/i
+    ];
+
+    function parseSeasonInfo(rawTitle) {
+      if (!rawTitle || typeof rawTitle !== 'string') {
+        return { baseTitle: '', seasonNum: 1, seasonLabel: '第1季', isExplicit: false };
+      }
+      const title = rawTitle.trim();
+      for (const pattern of SEASON_PATTERNS) {
+        const match = title.match(pattern);
+        if (match) {
+          const num = parseChineseNumber(match[1]);
+          if (num && num > 0 && num <= 100) {
+            const baseTitle = title.slice(0, match.index).trim();
+            if (baseTitle) {
+              return { baseTitle, seasonNum: num, seasonLabel: `第${num}季`, isExplicit: true };
+            }
+          }
+        }
+      }
+      return { baseTitle: title, seasonNum: 1, seasonLabel: '第1季', isExplicit: false };
+    }
+
+    function normalizeBaseTitle(title) {
+      return (title || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[：:]/g, ':')
+        .replace(/[，,]/g, ',')
+        .replace(/[！!]/g, '!')
+        .replace(/[？?]/g, '')
+        .replace(/[“”"']/g, '')
+        .replace(/\s+/g, '');
+    }
+
+    async function fetchRelatedSeasons(series) {
+      if (!series || !series.series_title) {
+        relatedSeasons.value = [];
+        seriesBaseTitle.value = '';
+        return;
+      }
+      const requestId = ++currentSeasonsRequest;
+      const { baseTitle, seasonNum, seasonLabel, isExplicit } = parseSeasonInfo(series.series_title);
+      seriesBaseTitle.value = baseTitle;
+
+      const currentItem = {
+        series_id: series.series_id,
+        series_title: series.series_title,
+        cover: series.cover,
+        total: series.episodes?.length || series.total,
+        social_info: series.social_info,
+        tags: series.tags,
+        seasonNum,
+        seasonLabel,
+        isExplicit
+      };
+
+      const cached = seasonsCache.get(baseTitle);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        relatedSeasons.value = cached;
+        return;
+      }
+
+      isCheckingSeasons.value = true;
+      try {
+        const res1 = await fetch(`/api/search?keyword=${encodeURIComponent(baseTitle)}&page=1`).then(r => r.json());
+        if (requestId !== currentSeasonsRequest) return;
+        let list = Array.isArray(res1?.results) ? [...res1.results] : [];
+
+        if (res1?.hasMore && list.length >= 5) {
+          try {
+            const res2 = await fetch(`/api/search?keyword=${encodeURIComponent(baseTitle)}&page=2`).then(r => r.json());
+            if (requestId === currentSeasonsRequest && Array.isArray(res2?.results)) {
+              list = list.concat(res2.results);
+            }
+          } catch (_) {}
+        }
+        if (requestId !== currentSeasonsRequest) return;
+
+        const normBase = normalizeBaseTitle(baseTitle);
+        const seenIds = new Set();
+        const result = [];
+
+        seenIds.add(currentItem.series_id);
+        result.push(currentItem);
+
+        for (const item of list) {
+          if (!item || !item.series_id || seenIds.has(item.series_id)) continue;
+          const parsed = parseSeasonInfo(item.series_title);
+          const itemNormBase = normalizeBaseTitle(parsed.baseTitle);
+
+          if (itemNormBase === normBase || (normBase.length >= 4 && itemNormBase.includes(normBase))) {
+            seenIds.add(item.series_id);
+            result.push({
+              series_id: item.series_id,
+              series_title: item.series_title,
+              cover: item.cover,
+              total: item.total,
+              social_info: item.social_info,
+              tags: item.tags,
+              seasonNum: parsed.seasonNum,
+              seasonLabel: parsed.seasonLabel,
+              isExplicit: parsed.isExplicit
+            });
+          }
+        }
+
+        // 必须严格按季升序排好序: 1, 2, 3, ..., N
+        result.sort((a, b) => {
+          if (a.seasonNum !== b.seasonNum) return a.seasonNum - b.seasonNum;
+          if (a.isExplicit && !b.isExplicit) return -1;
+          if (!a.isExplicit && b.isExplicit) return 1;
+          return (b.total || 0) - (a.total || 0);
+        });
+
+        seasonsCache.set(baseTitle, result);
+        relatedSeasons.value = result;
+      } catch (err) {
+        if (requestId !== currentSeasonsRequest) return;
+        console.warn('获取系列各季失败:', err);
+        relatedSeasons.value = [currentItem];
+      } finally {
+        if (requestId === currentSeasonsRequest) {
+          isCheckingSeasons.value = false;
+        }
+      }
+    }
+
+    function selectSeason(season) {
+      if (!season || !season.series_id) return;
+      if (season.series_id === activeSeries.value?.series_id) {
+        closeSeasonsModal();
+        return;
+      }
+      closeSeasonsModal();
+      closeDramaDetail();
+      sidebarTab.value = 'episodes';
+      return openTheater(season);
+    }
+
+    function openSeasonsModal() {
+      showSeasonsModal.value = true;
+      if (typeof nextTick === 'function') {
+        nextTick(() => {
+          const modal = document?.querySelector?.('.seasons-modal');
+          modal?.focus?.();
+        });
+      }
+    }
+
+    function closeSeasonsModal() {
+      showSeasonsModal.value = false;
+      keepPlayerFocus();
+    }
+
+    function onSeasonsModalKeydown(e) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        e.preventDefault();
+        closeSeasonsModal();
+      }
+    }
+
+    function searchSeriesGlobally(keyword) {
+      closeSeasonsModal();
+      closeDramaDetail();
+      leaveTheater();
+      searchKeyword.value = keyword || seriesBaseTitle.value;
+      handleSearch();
+    }
+
+    function openSeasonsModalFromDetail() {
+      closeDramaDetail();
+      openSeasonsModal();
+    }
+
     // ================= 沉浸式剧场与播放逻辑 =================
 
     function resetPlayback() {
@@ -906,6 +1153,8 @@ createApp({
       setControlsHidden(false);
       clearTimeout(controlsHideTimer);
       showDramaDetailModal.value = false;
+      showSeasonsModal.value = false;
+      sidebarTab.value = 'episodes';
       viewMode.value = 'catalog';
       if (navigator.mediaSession) { navigator.mediaSession.playbackState = 'none'; navigator.mediaSession.metadata = null; }
     }
@@ -933,6 +1182,7 @@ createApp({
           detail.tags = drama.tags;
         }
         activeSeries.value = detail;
+        fetchRelatedSeasons(detail);
         const watched = detail.saved_progress?.watched_indexes || [detail.saved_progress?.episode_index];
         watchedMap.value.set(detail.series_id, new Set(watched.filter(index => Number.isInteger(index) && index > 0)));
         activeEpisodes.value = detail.episodes;
@@ -1405,6 +1655,11 @@ createApp({
           closeDramaDetail();
           return;
         }
+        if (showSeasonsModal.value) {
+          e.preventDefault();
+          closeSeasonsModal();
+          return;
+        }
         if (activeActor.value) {
           e.preventDefault();
           closeActorDetail();
@@ -1628,6 +1883,21 @@ createApp({
       closeDramaDetail,
       openActorFromDrama,
       onDramaModalKeydown,
+      relatedSeasons,
+      isCheckingSeasons,
+      seriesBaseTitle,
+      showSeasonsModal,
+      sidebarTab,
+      titleCopied,
+      copyDramaTitle,
+      openSeasonsModal,
+      closeSeasonsModal,
+      onSeasonsModalKeydown,
+      selectSeason,
+      searchSeriesGlobally,
+      openSeasonsModalFromDetail,
+      parseSeasonInfo,
+      fetchRelatedSeasons,
       showAppMenu,
       showAboutModal, appVersion,
       showShortcutsModal,
