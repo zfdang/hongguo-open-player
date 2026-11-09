@@ -10,8 +10,8 @@ x264_commit=b35605ace3ddf7c1a5d67a2eb553f034aef41d55
 prefix="$work/x264-install"
 case "$(uname -m)" in arm64|aarch64) arch=arm64 ;; x86_64|amd64) arch=x64 ;; *) echo 'Unsupported architecture' >&2; exit 1 ;; esac
 case "$(uname -s)" in
-  MINGW*|MSYS*) suffix=.exe; extra_ldflags=-static; export CC=clang CXX=clang++ ;;
-  Darwin) suffix=; extra_ldflags= ;;
+  MINGW*|MSYS*) suffix=.exe; extra_ldflags=-static; cc_flags='--cc=clang --cxx=clang++'; export CC=clang CXX=clang++ ;;
+  Darwin) suffix=; extra_ldflags=; cc_flags= ;;
   *) echo 'Unsupported platform' >&2; exit 1 ;;
 esac
 
@@ -31,7 +31,7 @@ export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
   --enable-protocol=file --enable-demuxer=mov --enable-muxer=mp4 \
   --enable-decoder=bvc2,aac --enable-encoder=libx264,aac --enable-libx264 \
   --enable-filter=scale,format,aresample --enable-gpl --enable-version3 \
-  --pkg-config-flags=--static ${extra_ldflags:+--extra-ldflags=$extra_ldflags}
+  --pkg-config-flags=--static $cc_flags ${extra_ldflags:+--extra-ldflags=$extra_ldflags}
 make -j4 ffmpeg
 ./ffmpeg$suffix -hide_banner -decoders 2>&1 | grep -q ' bvc2 '
 ./ffmpeg$suffix -hide_banner -encoders 2>&1 | grep -q ' libx264 '
