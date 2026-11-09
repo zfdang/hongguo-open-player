@@ -9,7 +9,11 @@ ffmpeg_commit=f6e945886e17c2cf882143bd98222b1bd66ffe28
 x264_commit=b35605ace3ddf7c1a5d67a2eb553f034aef41d55
 prefix="$work/x264-install"
 case "$(uname -m)" in arm64|aarch64) arch=arm64 ;; x86_64|amd64) arch=x64 ;; *) echo 'Unsupported architecture' >&2; exit 1 ;; esac
-case "$(uname -s)" in MINGW*|MSYS*) suffix=.exe; extra_ldflags=-static ;; Darwin) suffix=; extra_ldflags= ;; *) echo 'Unsupported platform' >&2; exit 1 ;; esac
+case "$(uname -s)" in
+  MINGW*|MSYS*) suffix=.exe; extra_ldflags=-static; export CC=clang CXX=clang++ ;;
+  Darwin) suffix=; extra_ldflags= ;;
+  *) echo 'Unsupported platform' >&2; exit 1 ;;
+esac
 
 curl -fsSL "https://github.com/mirror/x264/archive/${x264_commit}.tar.gz" -o "$work/x264.tar.gz"
 mkdir "$work/x264"
