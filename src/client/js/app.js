@@ -373,6 +373,7 @@ createApp({
     const streamRefreshTick = ref(0);
     let bytevc2Session = null;
     let bytevc2Fallback = null;
+    let bytevc2FallbackActive = false;
 
     // 当前播放直链 (通过本地边下边解代理)
     const currentStreamUrl = computed(() => {
@@ -886,6 +887,7 @@ createApp({
       bytevc2Session?.stop();
       bytevc2Session = null;
       bytevc2Fallback = null;
+      bytevc2FallbackActive = false;
       lastNearEndPrefetch = 0;
       stopDanmakuAnimation();
       progressReady = false;
@@ -1224,6 +1226,11 @@ createApp({
       if (bytevc2Session && bytevc2Fallback) { bytevc2Fallback(); return; }
       const code = videoEl.value?.error?.code;
       const message = videoEl.value?.error?.message || '';
+      if (bytevc2FallbackActive) {
+        reportClientLog('ERROR', `ByteVC2 完整转换播放失败: code=${code}, message=${message}`);
+        videoErrorMessage.value = 'ByteVC2 视频转换或播放失败，请重试本集';
+        return;
+      }
       if (code !== 4) reportClientLog('ERROR', `播放器解码/渲染报错: code=${code}, message=${message}`);
       if (code === 3) {
         videoErrorMessage.value = '视频解码失败；请重试或更换分集，Windows 用户请确认已安装 HEVC 视频扩展';
@@ -1255,6 +1262,7 @@ createApp({
                   bytevc2Session?.stop();
                   bytevc2Session = null;
                   bytevc2Fallback = null;
+                  bytevc2FallbackActive = true;
                   video.src = streamUrl.replace(/([?&])mse=1(?=&|$)/, '$1mse=buffered');
                   video.load();
                   video.play().catch(() => {});
@@ -1295,6 +1303,7 @@ createApp({
       bytevc2Session?.stop();
       bytevc2Session = null;
       bytevc2Fallback = null;
+      bytevc2FallbackActive = false;
       videoErrorMessage.value = '';
       streamRefreshTick.value++;
       if (videoEl.value) {

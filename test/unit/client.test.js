@@ -983,6 +983,9 @@ test('progressive playback failure falls back to buffered conversion', async () 
   state.videoEl.value.duration = 46;
   state.onLoadedMetadata();
   assert.equal(state.videoEl.value.currentTime, 12);
+  await state.onVideoError();
+  assert.match(state.videoErrorMessage.value, /ByteVC2 视频转换或播放失败/);
+  assert.equal(loaded, 1, 'a failed fallback must not restart progressive playback');
 });
 
 test('onVideoError displays custom stream error when probe reports other server error, and handles code 3', async () => {
