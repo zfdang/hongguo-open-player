@@ -1280,6 +1280,14 @@ test('parseSeasonInfo correctly parses Chinese, Arabic numbers, suffixes and bra
   const pSeason = state.parseSeasonInfo('大唐荣耀 (Season 5)');
   assert.equal(pSeason.baseTitle, '大唐荣耀');
   assert.equal(pSeason.seasonNum, 5);
+
+  const pColon = state.parseSeasonInfo('持械入宋：第四季');
+  assert.equal(pColon.baseTitle, '持械入宋');
+  assert.equal(pColon.seasonNum, 4);
+
+  const pAsciiColon = state.parseSeasonInfo('持械入宋: 第四季');
+  assert.equal(pAsciiColon.baseTitle, '持械入宋');
+  assert.equal(pAsciiColon.seasonNum, 4);
 });
 
 test('fetchRelatedSeasons retrieves all seasons, deduplicates and sorts ascending 1 to N', async () => {
@@ -1414,12 +1422,15 @@ test('index.html and app.css include multi-season navigation and text selection 
   assert.ok(html.includes('modal-copy-btn'), 'modal-copy-btn must be present');
   assert.ok(html.includes('copyDramaTitle'), 'copyDramaTitle method must be bound');
 
-  // Verify full seasons modal dialog
+  // Verify full seasons modal dialog and elegant playing tag
   assert.ok(html.includes('seasons-modal'), 'seasons-modal must be present');
   assert.ok(html.includes('showSeasonsModal'), 'showSeasonsModal state must control modal');
+  assert.ok(html.includes('season-playing-tag'), 'season-playing-tag badge must be present');
+  assert.ok(html.includes('playing-bars'), 'Audio equalizer playing bars must be present');
 
   // Verify CSS enables text selection for modals and descriptions
   assert.ok(css.includes('user-select: text'), 'app.css must allow text selection');
   assert.ok(css.includes('.drama-modal'), 'drama-modal must be styled for selectable text');
   assert.ok(css.includes('.seasons-modal'), 'seasons-modal styles must exist');
+  assert.ok(css.includes('.season-playing-tag'), 'season-playing-tag styling must exist');
 });

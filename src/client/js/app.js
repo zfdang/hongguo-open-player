@@ -965,14 +965,16 @@ createApp({
         if (match) {
           const num = parseChineseNumber(match[1]);
           if (num && num > 0 && num <= 100) {
-            const baseTitle = title.slice(0, match.index).trim();
+            const rawBase = title.slice(0, match.index).trim();
+            const baseTitle = rawBase.replace(/[\s:：·_—\-]+$/, '').trim() || rawBase;
             if (baseTitle) {
               return { baseTitle, seasonNum: num, seasonLabel: `第${num}季`, isExplicit: true };
             }
           }
         }
       }
-      return { baseTitle: title, seasonNum: 1, seasonLabel: '第1季', isExplicit: false };
+      const cleaned = title.replace(/[\s:：·_—\-]+$/, '').trim() || title;
+      return { baseTitle: cleaned, seasonNum: 1, seasonLabel: '第1季', isExplicit: false };
     }
 
     function normalizeBaseTitle(title) {
