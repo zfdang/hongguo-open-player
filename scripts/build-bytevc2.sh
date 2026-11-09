@@ -32,7 +32,7 @@ export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
   --enable-decoder=bvc2,aac --enable-encoder=libx264,aac --enable-libx264 \
   --enable-filter=scale,format,aresample --enable-gpl --enable-version3 \
   --pkg-config-flags=--static $cc_flags ${extra_ldflags:+--extra-ldflags=$extra_ldflags}
-make -j4 ffmpeg
+make -j4 "ffmpeg$suffix"
 ./ffmpeg$suffix -hide_banner -decoders 2>&1 | grep -q ' bvc2 '
 ./ffmpeg$suffix -hide_banner -encoders 2>&1 | grep -q ' libx264 '
 mkdir -p "$root/build/bytevc2/$arch"
