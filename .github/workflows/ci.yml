@@ -14,6 +14,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  decoder:
+    name: Build ByteVC2 decoder (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          install: >-
+            make patch curl tar gzip
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-pkgconf
+      - if: runner.os == 'macOS'
+        run: bash scripts/build-bytevc2.sh
+      - if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash scripts/build-bytevc2.sh
+
   test:
     name: Test on ${{ matrix.os }} (Node ${{ matrix.node-version }})
     runs-on: ${{ matrix.os }}

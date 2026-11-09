@@ -1240,6 +1240,8 @@ createApp({
                 videoErrorMessage.value = '视频源地址未通过安全检查；请切换分集重试';
               } else if (errData?.code === 'UNSUPPORTED_BYTEVC2') {
                 videoErrorMessage.value = '本集使用 ByteVC2 编码，当前播放器暂不支持';
+              } else if (errData?.code === 'BYTEVC2_TRANSCODER_UNAVAILABLE' || errData?.code === 'BYTEVC2_TRANSCODE_FAILED') {
+                videoErrorMessage.value = errData.error || 'ByteVC2 视频转换失败，请重试';
               } else if (errData?.error) {
                 videoErrorMessage.value = `${errData.error}；请检查网络或重试切换分集`;
               }

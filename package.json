@@ -30,6 +30,7 @@
     },
     "artifactName": "${name}-${version}-${os}-${arch}.${ext}",
     "mac": {
+      "extraResources": [{ "from": "build/bytevc2/${arch}", "to": "bytevc2" }],
       "category": "public.app-category.video",
       "icon": "build/icon.icns",
       "artifactName": "${name}-${version}-mac-${arch}.${ext}",
@@ -73,6 +74,7 @@
       }
     },
     "win": {
+      "extraResources": [{ "from": "build/bytevc2/${arch}", "to": "bytevc2" }],
       "target": [
         {
           "target": "nsis",

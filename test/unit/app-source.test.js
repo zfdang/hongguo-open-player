@@ -42,9 +42,13 @@ test('reports ByteVC2 only when no compatible source is available', async () => 
     await assert.rejects(appSource.fetchAppPlayUrl('30001'), { code: 'UNSUPPORTED_BYTEVC2', message: /ByteVC2/ });
     await assert.rejects(appSource.fetchAppPlayUrl('30001'), { code: 'UNSUPPORTED_BYTEVC2' });
     assert.equal(requests, 1, 'repeated probes reuse the unsupported model');
+    const bvc = await appSource.fetchAppPlayUrl('30001', { allowBytevc2: true });
+    assert.equal(bvc.codec, 'bytevc2');
+    assert.equal(requests, 1);
     model.video_list.push(compatible);
-    const result = await appSource.fetchAppPlayUrl('30001', { refresh: true });
+    const result = await appSource.fetchAppPlayUrl('30001', { refresh: true, allowBytevc2: true });
     assert.equal(result.codec, 'hevc');
+    assert.ok(result.variants.every(variant => variant.codec === 'hevc'));
     await assert.rejects(appSource.fetchAppPlayUrl('30001', { refresh: true, quality: '1080p' }), /满足 1080p/);
   } finally {
     appSource.requestJson = originalRequest;

@@ -5,13 +5,15 @@ const { pipeline } = require('node:stream/promises');
 const rangeMedia = require('./rangeMedia');
 const appSource = require('../native/app-source');
 const { decryptMp4Buffer } = require('../native/hongguo');
+const { transcodeBytevc2 } = require('../native/bytevc2-transcode');
 const { normalizeDownloadQuality } = require('../native/download-quality');
 const { webMediaRequestOptions } = require('../native/web-media-guard');
 const logger = require('./logger');
 
 class StreamService {
-  constructor({ requestOptions = webMediaRequestOptions } = {}) {
+  constructor({ requestOptions = webMediaRequestOptions, transcode = transcodeBytevc2 } = {}) {
     this.requestOptions = requestOptions;
+    this.transcode = transcode;
     // 内存 LRU 缓存：vid -> { buffer, size, timestamp }
     this.cache = new Map();
     this.maxCacheBytes = 128 * 1024 * 1024;
@@ -273,7 +275,7 @@ class StreamService {
   async loadBuffer(vid, quality, signal) {
     const t0 = Date.now();
     logger.info('StreamService', `[Decrypt] 开始全量拉取并解密视频: vid=${vid}, quality=${quality}`);
-    const playInfo = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, signal });
+    const playInfo = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, allowBytevc2: true, signal });
     signal.throwIfAborted();
     if (!playInfo?.url) throw new Error('未获取到有效的视频流链接');
     const { buffer, variant } = await this.downloadFastestMedia(playInfo.variants, playInfo, 25000, signal);
@@ -281,8 +283,10 @@ class StreamService {
     const contentKey = variant.contentKey || playInfo.contentKey;
     const key = Buffer.isBuffer(contentKey) ? contentKey : Buffer.from(contentKey || '', 'hex');
     const tDecrypt = Date.now();
-    const decrypted = decryptMp4Buffer(buffer, key);
-    logger.info('StreamService', `[Decrypt] 全集视频解密完成: vid=${vid}, 输入=${buffer.length} 字节, 输出=${decrypted.length} 字节, 解密耗时=${Date.now() - tDecrypt}ms, 总耗时=${Date.now() - t0}ms`);
+    const decrypted = variant.codec === 'bytevc2'
+      ? await this.transcode(buffer, key, signal)
+      : decryptMp4Buffer(buffer, key);
+    logger.info('StreamService', `[Decrypt] 全集视频${variant.codec === 'bytevc2' ? '转码' : '解密'}完成: vid=${vid}, 输入=${buffer.length} 字节, 输出=${decrypted.length} 字节, 耗时=${Date.now() - tDecrypt}ms, 总耗时=${Date.now() - t0}ms`);
     this.cache.set(`${vid}:${quality}`, { buffer: decrypted, size: decrypted.length });
     this.pruneCache();
     return decrypted;
@@ -359,7 +363,8 @@ class StreamService {
     if (cached?.expires > Date.now() + minValidityMs) { this.plans.delete(key); this.plans.set(key, cached); return cached.plan; }
     const t0 = Date.now();
     logger.info('StreamService', `开始构建流式分片播放计划: vid=${vid}, quality=${quality}`);
-    const info = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, signal, nextVids });
+    const info = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, allowBytevc2: true, signal, nextVids });
+    if (info.codec === 'bytevc2') return null;
     let lastError;
     let hasRangeUnsupported = false;
     const rawVariants = info.variants?.length ? info.variants : [info];

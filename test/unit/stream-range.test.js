@@ -2,6 +2,35 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const StreamService = require('../../src/server/services/streamService').constructor;
 
+test('ByteVC2 uses buffered transcoding and caches the resulting playable video', async () => {
+  const appSource = require('../../src/server/native/app-source');
+  const original = appSource.fetchAppPlayUrl;
+  const key = '0123456789abcdef0123456789abcdef';
+  let conversions = 0;
+  const service = new StreamService({ transcode: async (buffer, actualKey, signal) => {
+    conversions++;
+    assert.equal(buffer.toString(), 'encrypted');
+    assert.equal(actualKey.toString('hex'), key);
+    assert.equal(signal.aborted, false);
+    return Buffer.from('playable');
+  } });
+  appSource.fetchAppPlayUrl = async (_vid, options) => {
+    assert.equal(options.allowBytevc2, true);
+    return { codec: 'bytevc2', url: 'https://example.com/video', contentKey: key };
+  };
+  service.downloadFastestMedia = async (_variants, variant) => ({ buffer: Buffer.from('encrypted'), variant });
+  try {
+    const signal = new AbortController().signal;
+    assert.equal(await service.getStreamingPlan('123', 'auto', signal), null);
+    assert.equal((await service.getDecryptedBuffer('123', 'auto', { signal })).toString(), 'playable');
+    assert.equal((await service.getDecryptedBuffer('123', 'auto', { signal })).toString(), 'playable');
+    assert.equal(conversions, 1);
+  } finally {
+    service.shutdown();
+    appSource.fetchAppPlayUrl = original;
+  }
+});
+
 test('HTTP ranges support suffix/open end and reject malformed or unsafe offsets', async () => {
   const service = new StreamService();
   service.getStreamingPlan = async () => null;

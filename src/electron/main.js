@@ -23,6 +23,9 @@ function createWindow() {
 
 async function buildWindow() {
   // 1. 启动本地内嵌 Node Express 引擎
+  if (app.isPackaged === false && !process.env.HONGGUO_BVC2_FFMPEG) {
+    process.env.HONGGUO_BVC2_FFMPEG = path.join(__dirname, '../../build/bytevc2', process.arch, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+  }
   process.env.HONGGUO_DATA_DIR = path.join(app.getPath('userData'), 'data');
   process.env.HONGGUO_LOG_DIR = path.join(app.getPath('userData'), 'logs');
   let logger;

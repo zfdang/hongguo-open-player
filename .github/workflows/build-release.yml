@@ -55,9 +55,50 @@ jobs:
         run: |
           node scripts/compute-release-version.js
 
+  build-bytevc2:
+    name: Build ByteVC2 decoder (${{ matrix.arch }})
+    needs: prep
+    if: ${{ needs.prep.outputs.should_release == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: mac-arm64
+            output: arm64
+          - os: macos-15-intel
+            arch: mac-x64
+            output: x64
+          - os: windows-latest
+            arch: win-x64
+            output: x64
+    steps:
+      - uses: actions/checkout@v7
+      - if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          install: >-
+            make patch curl tar gzip
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-pkgconf
+      - name: Build decoder (macOS)
+        if: runner.os == 'macOS'
+        run: bash scripts/build-bytevc2.sh
+      - name: Build decoder (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash scripts/build-bytevc2.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bytevc2-${{ matrix.arch }}
+          path: build/bytevc2/${{ matrix.output }}/
+          if-no-files-found: error
+
   build:
     name: Build Native Apps (${{ matrix.platform }})
-    needs: prep
+    needs: [prep, build-bytevc2]
     if: ${{ needs.prep.outputs.should_release == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -83,6 +124,28 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Download macOS decoders
+        if: matrix.platform == 'macos'
+        uses: actions/download-artifact@v8
+        with:
+          pattern: bytevc2-mac-*
+          path: decoder-artifacts
+
+      - name: Arrange macOS decoders
+        if: matrix.platform == 'macos'
+        run: |
+          mkdir -p build/bytevc2/arm64 build/bytevc2/x64
+          cp decoder-artifacts/bytevc2-mac-arm64/ffmpeg build/bytevc2/arm64/ffmpeg
+          cp decoder-artifacts/bytevc2-mac-x64/ffmpeg build/bytevc2/x64/ffmpeg
+          chmod +x build/bytevc2/{arm64,x64}/ffmpeg
+
+      - name: Download Windows decoder
+        if: matrix.platform == 'windows'
+        uses: actions/download-artifact@v8
+        with:
+          name: bytevc2-win-x64
+          path: build/bytevc2/x64
 
       - name: Sync package version
         shell: bash
