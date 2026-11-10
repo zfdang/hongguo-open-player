@@ -1,5 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { gunzipSync } = require('node:zlib');
+const { createHash } = require('node:crypto');
 const appSource = require('../../src/server/native/app-source');
 
 function mockEntry(vid) {
@@ -89,7 +91,11 @@ test('fetchAppPlayUrl batches nextVids and caches returned models in entryCache'
     if (url.includes('register')) {
       return { code: 0, device_id_str: '999', install_id_str: '888' };
     }
-    requests.push({ url, body: JSON.parse(options.data) });
+    assert.equal(options.headers['Content-Encoding'], 'gzip');
+    assert.equal(options.headers['x-ss-stub'], createHash('md5').update(options.data).digest('hex').toUpperCase());
+    assert.equal(options.headers['x-ss-req-ticket'], new URL(url).searchParams.get('_rticket'));
+    assert.equal(new URL(url).searchParams.get('version_name'), '7.4.3.32');
+    requests.push({ url, body: JSON.parse(gunzipSync(options.data)) });
     return {
       code: 0,
       data: {
