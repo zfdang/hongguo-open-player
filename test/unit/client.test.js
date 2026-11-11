@@ -203,7 +203,14 @@ test('shortcuts work when focus is on buttons and range inputs, and ignore text 
   listeners.keydown({ target: { tagName: 'INPUT', type: 'range', blur }, code: 'Space', key: ' ', preventDefault: prevent });
   assert.equal(paused, true);
 
-  // 6. When typing in a text input (e.g. search box), shortcuts are ignored
+  // 6. Pressing J toggles sidebarOpen
+  assert.equal(state.sidebarOpen.value, true);
+  listeners.keydown({ target: { tagName: 'BUTTON', blur }, code: 'KeyJ', key: 'j', preventDefault: prevent });
+  assert.equal(state.sidebarOpen.value, false);
+  listeners.keydown({ target: { tagName: 'BUTTON', blur }, code: 'KeyJ', key: 'J', preventDefault: prevent });
+  assert.equal(state.sidebarOpen.value, true);
+
+  // 7. When typing in a text input (e.g. search box), shortcuts are ignored
   listeners.keydown({ target: { tagName: 'INPUT', type: 'text' }, code: 'Space', key: ' ', preventDefault: prevent });
   assert.equal(paused, true); // not toggled
 });

@@ -295,7 +295,7 @@
                 @click="sidebarOpen = !sidebarOpen" 
                 :aria-expanded="sidebarOpen" 
                 aria-controls="episode-sidebar" 
-                :title="sidebarOpen ? '隐藏侧边栏' : '显示侧边栏'"
+                :title="(sidebarOpen ? '隐藏侧边栏' : '显示侧边栏') + ' (J)'"
               >
                 <svg v-if="sidebarOpen" class="sidebar-toggle-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                   <rect x="2" y="3" width="16" height="14" rx="2"/><path d="M13 3v14"/><path d="M5 10h5M8 7.5 10.5 10 8 12.5"/>
@@ -895,6 +895,10 @@
             <div class="shortcut-item">
               <div class="keys"><kbd>M</kbd></div>
               <div class="desc">静音 / 恢复声音</div>
+            </div>
+            <div class="shortcut-item">
+              <div class="keys"><kbd>J</kbd></div>
+              <div class="desc">显示 / 隐藏选集侧边栏</div>
             </div>
             <div class="shortcut-item">
               <div class="keys"><kbd>Esc</kbd></div>

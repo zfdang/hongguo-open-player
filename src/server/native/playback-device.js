@@ -161,16 +161,15 @@ function createPlaybackDeviceRegistrar(options = {}) {
         if (currentDevice) return Promise.resolve(currentDevice);
         if (persist) {
             const loaded = loadPersistedDevice(deviceFilePath);
-            if (loaded) {
+            // 老用户场景：若本地记录的是旧版基准静态设备 (DEFAULT_VERIFIED_DEVICE)，不直接作为正式设备，
+            // 而是触发在线注册以平滑迁移升级至独有注册设备
+            if (loaded && loaded.device_id !== DEFAULT_VERIFIED_DEVICE.device_id) {
                 currentDevice = loaded;
                 logger.info('PlaybackDevice', `已加载本地持久化设备: device_id=${currentDevice.device_id}, iid=${currentDevice.iid}`);
                 return Promise.resolve(currentDevice);
             }
-            if (process.env.NODE_ENV !== 'test') {
-                currentDevice = DEFAULT_VERIFIED_DEVICE;
-                savePersistedDevice(deviceFilePath, currentDevice);
-                logger.info('PlaybackDevice', `已初始化基准播放设备: device_id=${currentDevice.device_id}, iid=${currentDevice.iid}`);
-                return Promise.resolve(currentDevice);
+            if (loaded && loaded.device_id === DEFAULT_VERIFIED_DEVICE.device_id) {
+                logger.info('PlaybackDevice', `检测到老用户本地使用基准静态设备 (device_id=${loaded.device_id})，准备自动迁移升级为独立注册设备...`);
             }
         }
         // Concurrent playback/search requests share registration. Retries reuse the
@@ -225,6 +224,12 @@ function createPlaybackDeviceRegistrar(options = {}) {
             registration = undefined;
             const reason = error.status ? `HTTP ${error.status}` : error.code || 'INVALID_RESPONSE';
             logger.error('PlaybackDevice', `匿名设备注册失败: ${reason}`);
+            // 生产环境下（非单测环境），注册失败时降级使用基准设备保底，确保播放器正常启动
+            if (process.env.NODE_ENV !== 'test') {
+                logger.warn('PlaybackDevice', `匿名设备注册暂不可用（${reason}），自动降级使用基准播放设备保底`);
+                currentDevice = DEFAULT_VERIFIED_DEVICE;
+                return currentDevice;
+            }
             throw Object.assign(new Error(`匿名播放设备注册失败（${reason}），请稍后重试`), {
                 code: 'DEVICE_REGISTRATION_FAILED', cause: error,
             });

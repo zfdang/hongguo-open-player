@@ -225,3 +225,78 @@ test('fallbackToDefault switches to DEFAULT_VERIFIED_DEVICE and updates disk', a
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('migrates legacy user baseline device on disk to newly registered device', async () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-legacy-'));
+  try {
+    const legacy = {
+      device_id: '1624456208323876',
+      iid: '1624456208327972',
+      cdid: '91d56f7e-c027-4ce9-9a3c-229d59a13c3b',
+      cookie: 'install_id=1624456208327972; store-region=cn-bj',
+      created_at: 1794307248831
+    };
+    fs.writeFileSync(path.join(tmpDir, 'device.json'), JSON.stringify(legacy), 'utf8');
+
+    let calls = 0;
+    const request = async () => {
+      calls++;
+      const res = { device_id_str: '88888888', install_id_str: '99999999', code: 0 };
+      Object.defineProperty(res, '_headers', {
+        value: { 'set-cookie': ['store-region=cn-bj; Path=/', 'install_id=99999999; Path=/'] },
+        enumerable: false
+      });
+      return res;
+    };
+
+    const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
+    const migrated = await getDevice(request);
+
+    assert.equal(calls, 1, 'Should call registration network request to migrate away from baseline device');
+    assert.equal(migrated.device_id, '88888888');
+    assert.equal(migrated.iid, '99999999');
+
+    const filePath = path.join(tmpDir, 'device.json');
+    const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    assert.equal(onDisk.device_id, '88888888');
+    assert.equal(onDisk.iid, '99999999');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('handles new user with no device.json by registering and persisting', async () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-newuser-'));
+  try {
+    let calls = 0;
+    const request = async () => {
+      calls++;
+      const res = { device_id_str: '77777777', install_id_str: '66666666', code: 0 };
+      Object.defineProperty(res, '_headers', {
+        value: { 'set-cookie': ['store-region=cn-bj; Path=/', 'install_id=66666666; Path=/'] },
+        enumerable: false
+      });
+      return res;
+    };
+
+    const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
+    const registered = await getDevice(request);
+
+    assert.equal(calls, 1);
+    assert.equal(registered.device_id, '77777777');
+    assert.equal(registered.iid, '66666666');
+
+    const filePath = path.join(tmpDir, 'device.json');
+    assert.ok(fs.existsSync(filePath));
+    const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    assert.equal(onDisk.device_id, '77777777');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

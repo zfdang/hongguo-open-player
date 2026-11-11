@@ -1853,6 +1853,11 @@ createApp({
           e.preventDefault();
           toggleMute();
           showOSD(isMuted.value ? '静音' : '开启声音');
+        } else if (e.key?.toLowerCase() === 'j') {
+          e.preventDefault();
+          e.target?.blur?.();
+          sidebarOpen.value = !sidebarOpen.value;
+          showOSD(sidebarOpen.value ? '显示选集侧栏' : '隐藏选集侧栏');
         } else if (e.key?.toLowerCase() === 'f') {
           e.preventDefault();
           e.target?.blur?.();
