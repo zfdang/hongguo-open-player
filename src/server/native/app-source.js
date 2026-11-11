@@ -8,7 +8,7 @@
 const crypto = require('node:crypto');
 const { gzipSync } = require('node:zlib');
 const logger = require('../services/logger');
-const { getPlaybackDevice } = require('./playback-device');
+const { getPlaybackDevice, DEFAULT_VERIFIED_DEVICE } = require('./playback-device');
 const sm3 = require('./sm3');
 const { normalizeDownloadQuality, meetsDownloadQuality } = require('./download-quality');
 const localId = () => String(1000000000000000n + BigInt('0x' + crypto.randomBytes(6).toString('hex')));
@@ -474,7 +474,29 @@ async function fetchAppPlayUrl(vid, options = {}) {
         if (err.code === 'EMPTY_RESPONSE') {
             logger.warn('AppSource', '播放接口返回空响应，尝试备用接口重试...');
             signed = playbackRequest(payload, device, VIDEO_API_FALLBACK);
-            response = await execRequestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
+            try {
+                response = await execRequestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
+            } catch (fallbackErr) {
+                signal.throwIfAborted();
+                if (fallbackErr.code === 'EMPTY_RESPONSE' && typeof getPlaybackDevice.fallbackToDefault === 'function' && DEFAULT_VERIFIED_DEVICE && device?.device_id !== DEFAULT_VERIFIED_DEVICE.device_id) {
+                    logger.warn('AppSource', '播放接口主备通道均返回空响应，自动切换至基准设备重试...');
+                    const fallbackDevice = getPlaybackDevice.fallbackToDefault();
+                    signed = playbackRequest(payload, fallbackDevice, VIDEO_API);
+                    try {
+                        response = await execRequestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
+                    } catch (retryErr) {
+                        signal.throwIfAborted();
+                        if (retryErr.code === 'EMPTY_RESPONSE') {
+                            signed = playbackRequest(payload, fallbackDevice, VIDEO_API_FALLBACK);
+                            response = await execRequestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
+                        } else {
+                            throw retryErr;
+                        }
+                    }
+                } else {
+                    throw fallbackErr;
+                }
+            }
         } else {
             throw err;
         }

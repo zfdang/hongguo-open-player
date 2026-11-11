@@ -161,3 +161,39 @@ test('fetchAppPlayUrl retries on EMPTY_RESPONSE from upstream API', async () => 
     appSource.clearEntryCache();
   }
 });
+
+test('fetchAppPlayUrl self-heals by falling back to verified default device when both endpoints return EMPTY_RESPONSE', async () => {
+  const originalRequest = appSource.requestJson;
+  appSource.clearEntryCache();
+  const urls = [];
+
+  appSource.requestJson = async (url) => {
+    if (url.includes('register')) {
+      return { code: 0, device_id_str: '999', install_id_str: '888' };
+    }
+    urls.push(url);
+    if (urls.length <= 2) {
+      // Primary and secondary fail for current registered device (999)
+      throw Object.assign(new Error('App upstream returned empty response'), { code: 'EMPTY_RESPONSE' });
+    }
+    // Succeeded on retry with verified default device
+    return {
+      code: 0,
+      data: {
+        '20002': mockEntry('20002')
+      }
+    };
+  };
+
+  try {
+    const play = await appSource.fetchAppPlayUrl('20002');
+    assert.equal(play.url, 'https://qznovelvod.com/video_20002.mp4');
+    assert.equal(urls.length, 3);
+    assert.ok(urls[0].includes('reading.snssdk.com'));
+    assert.ok(urls[1].includes('api5-normal-sinfonlinea.fqnovel.com'));
+    assert.ok(urls[2].includes('device_id=1624456208323876'), 'Fallback request should use DEFAULT_VERIFIED_DEVICE');
+  } finally {
+    appSource.requestJson = originalRequest;
+    appSource.clearEntryCache();
+  }
+});

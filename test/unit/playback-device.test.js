@@ -109,7 +109,7 @@ test('persisted device is loaded from disk and avoids network requests', async (
       device_id: '987654321012345',
       iid: '123456789012345',
       cdid: '00000000-0000-0000-0000-000000000001',
-      cookie: 'store-region=cn-bj; store-region-src=did; install_id=123456789012345; ttreq=1$fake',
+      cookie: 'store-region=cn-bj; store-region-src=did; install_id=123456789012345',
       created_at: 1700000000000
     };
     fs.writeFileSync(path.join(tmpDir, 'device.json'), JSON.stringify(existing), 'utf8');
@@ -162,6 +162,65 @@ test('new registration saves device and cookie to disk and reset removes it', as
     // Reset should delete persisted disk file
     getDevice.reset(registered);
     assert.equal(fs.existsSync(filePath), false, 'device.json should be removed on explicit reset');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('persisted device sanitizes ttreq from cookies', async () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-sanitize-'));
+  try {
+    const existing = {
+      device_id: '987654321012345',
+      iid: '123456789012345',
+      cdid: '00000000-0000-0000-0000-000000000001',
+      cookie: 'store-region=cn-bj; ttreq=1$expiredtoken; store-region-src=did; install_id=123456789012345',
+      created_at: 1700000000000
+    };
+    fs.writeFileSync(path.join(tmpDir, 'device.json'), JSON.stringify(existing), 'utf8');
+
+    const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
+    const loaded = await getDevice(async () => { throw new Error('should not call network'); });
+
+    assert.equal(loaded.cookie.includes('ttreq='), false, 'Cookie should not contain single-use ttreq');
+    assert.ok(loaded.cookie.includes('store-region=cn-bj'));
+    assert.ok(loaded.cookie.includes('install_id=123456789012345'));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('fallbackToDefault switches to DEFAULT_VERIFIED_DEVICE and updates disk', async () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-fallback-'));
+  try {
+    const existing = {
+      device_id: '987654321012345',
+      iid: '123456789012345',
+      cdid: '00000000-0000-0000-0000-000000000001',
+      cookie: 'store-region=cn-bj; install_id=123456789012345',
+      created_at: 1700000000000
+    };
+    fs.writeFileSync(path.join(tmpDir, 'device.json'), JSON.stringify(existing), 'utf8');
+
+    const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
+    const loaded = await getDevice(async () => { throw new Error('should not call network'); });
+    assert.equal(loaded.device_id, '987654321012345');
+
+    const fallback = getDevice.fallbackToDefault();
+    assert.equal(fallback.device_id, '1624456208323876');
+
+    const current = await getDevice(async () => { throw new Error('should return fallback device'); });
+    assert.equal(current.device_id, '1624456208323876');
+
+    const filePath = path.join(tmpDir, 'device.json');
+    const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    assert.equal(onDisk.device_id, '1624456208323876');
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
