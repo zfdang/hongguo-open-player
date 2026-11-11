@@ -276,7 +276,13 @@ createApp({
     }
 
     function startDanmakuAnimation() {
-      if (danmakuEngine || !danmakuEnabled.value || !videoEl.value || !danmakuLayer.value || typeof Danmaku === 'undefined') return;
+      if (!danmakuEnabled.value || !videoEl.value || !danmakuLayer.value || typeof Danmaku === 'undefined') return;
+      if (danmakuEngine) {
+        if (videoEl.value && !videoEl.value.paused) {
+          danmakuEngine.play?.();
+        }
+        return;
+      }
       const layer = danmakuLayer.value;
       const prioritized = prioritizeDanmakuItems(danmakuItems.value, {
         rows: danmakuRows.value,
@@ -302,6 +308,10 @@ createApp({
         }
       }));
       danmakuEngine = new Danmaku({ container: layer, media: videoEl.value, comments, speed: danmakuSpeedForWidth(layer.offsetWidth) });
+      if (videoEl.value && !videoEl.value.paused) {
+        danmakuEngine.seek?.();
+        danmakuEngine.play?.();
+      }
       const resize = () => {
         if (!danmakuEngine || !layer.offsetWidth || !layer.offsetHeight) return;
         danmakuEngine.speed = danmakuSpeedForWidth(layer.offsetWidth);
@@ -510,6 +520,7 @@ createApp({
       const target = Math.max(0, Math.min(duration.value, Number(event.target.value)));
       videoEl.value.currentTime = target;
       currentTime.value = target;
+      danmakuEngine?.seek?.();
     }
     function startScrubbing(event) {
       isScrubbing.value = true;
@@ -523,6 +534,7 @@ createApp({
       saveProgressNow();
       event?.target?.blur?.();
       keepPlayerFocus();
+      danmakuEngine?.seek?.();
       resetControlsTimer();
     }
     function notify(message) {
@@ -1318,6 +1330,7 @@ createApp({
       bytevc2FallbackActive = false;
       lastNearEndPrefetch = 0;
       stopDanmakuAnimation();
+      danmakuKey = '';
       progressReady = false;
       pendingResumeSec = 0;
       currentTime.value = 0;
@@ -1575,6 +1588,7 @@ createApp({
       isPlaying.value = true;
       loadDanmaku();
       startDanmakuAnimation();
+      danmakuEngine?.play?.();
       markWatched(activeEpisodeIndex.value);
       if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing';
       isBuffering.value = false;
@@ -1596,6 +1610,7 @@ createApp({
     function onPause(event) {
       if (event && event.target !== videoEl.value) return;
       isPlaying.value = false;
+      danmakuEngine?.pause?.();
       if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused';
       saveProgressNow();
       setControlsHidden(false);
@@ -1623,6 +1638,7 @@ createApp({
         if (pendingResumeSec > 0 && pendingResumeSec < duration.value) {
           try {
             videoEl.value.currentTime = pendingResumeSec;
+            danmakuEngine?.seek?.();
           } catch (e) {
             console.warn('恢复历史播放位置失败:', e);
           }

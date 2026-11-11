@@ -846,10 +846,10 @@ html.platform-mac .app-header {
 
 /* 底部控制器 */
 .player-controls {
-  height: 60px;
+  height: 72px;
   background-color: var(--bg-surface);
   border-top: 1px solid var(--border-color);
-  padding: 0 20px 4px 20px;
+  padding: 4px 20px 14px 20px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -2972,7 +2972,7 @@ html.platform-win .app-header { padding-right: 160px; }
 @media (max-width: 760px) {
   .brand-name { display: none; }
   .nav-tabs { gap: 2px; }
-  .theater-sidebar { position: absolute; top: 52px; bottom: 60px; right: 0; z-index: 20; width: min(300px, 85vw); box-shadow: var(--shadow); }
+  .theater-sidebar { position: absolute; top: 52px; bottom: 72px; right: 0; z-index: 20; width: min(300px, 85vw); box-shadow: var(--shadow); }
   .controls-toolbar { gap: 4px; }
   .controls-left, .controls-right { gap: 4px; }
   .volume-slider { width: 55px; }

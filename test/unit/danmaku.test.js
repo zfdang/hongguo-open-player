@@ -154,3 +154,10 @@ test('fetchDanmaku reports 本集暂无弹幕 when video naturally ends with 0 c
   assert.equal(result.error, '');
   danmaku.resetDanmakuCache();
 });
+
+test('Danmaku DOM engine provides play, pause, seek on prototype', () => {
+  const Danmaku = require('../../src/client/js/danmaku.dom');
+  assert.equal(typeof Danmaku.prototype.play, 'function');
+  assert.equal(typeof Danmaku.prototype.pause, 'function');
+  assert.equal(typeof Danmaku.prototype.seek, 'function');
+});

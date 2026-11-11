@@ -1142,6 +1142,9 @@ test('danmaku engine receives episode comments and is replaced when switching ep
     constructor(options) { this.options = options; instances.push(this); }
     destroy() { this.destroyed = true; }
     resize() {}
+    play() { this.playing = true; }
+    pause() { this.playing = false; }
+    seek() { this.seeked = true; }
   }
   const state = client(async url => url.startsWith('/api/danmaku/')
     ? response({ success: true, items: [{ time: 2, text: url.includes('111111') ? 'first' : 'second', likes: 0 }] })
@@ -1159,6 +1162,33 @@ test('danmaku engine receives episode comments and is replaced when switching ep
   assert.equal(first.destroyed, true);
   assert.notEqual(instances.at(-1), first);
   assert.equal(instances.at(-1).options.comments.length, 1);
+});
+
+test('seekFromSlider and finishScrubbing invoke danmakuEngine seek', async () => {
+  let seekCalled = 0;
+  class FakeDanmaku {
+    constructor(options) { this.options = options; }
+    destroy() {}
+    resize() {}
+    seek() { seekCalled++; }
+    play() {}
+    pause() {}
+  }
+  const state = client(async url => url.startsWith('/api/danmaku/')
+    ? response({ success: true, items: [{ time: 10, text: 'danmaku', likes: 1 }] })
+    : response({ series_id: '123456', episodes: [{ vid: '111111', vid_index: 1 }] }),
+  { Danmaku: FakeDanmaku });
+  state.danmakuLayer.value = { offsetWidth: 800, offsetHeight: 96 };
+  await state.openTheater({ series_id: '123456' });
+  state.videoEl.value = { pause() {}, play() { return Promise.resolve(); }, currentTime: 0 };
+  state.duration.value = 100;
+  await new Promise(resolve => setImmediate(resolve));
+  state.seekFromSlider({ target: { value: 25 } });
+  assert.equal(state.videoEl.value.currentTime, 25);
+  assert.ok(seekCalled >= 1);
+  const beforeScrub = seekCalled;
+  state.finishScrubbing();
+  assert.ok(seekCalled > beforeScrub);
 });
 
 test('search history selection searches again and supports removal', async () => {

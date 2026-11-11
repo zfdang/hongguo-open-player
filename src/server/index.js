@@ -33,6 +33,25 @@ app.use((req, res, next) => {
   }
   next();
 });
+// 核心 API 请求访问与耗时日志中间件 (用于日常排错与运行诊断，置于最前以确保 401/403 等均被完整记录)
+app.use((req, res, next) => {
+  if (req.path.toLowerCase().startsWith('/api/')) {
+    const t0 = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - t0;
+      const msg = `${req.method} ${req.originalUrl || req.url} -> ${res.statusCode} (${duration}ms)`;
+      if (res.statusCode >= 500) {
+        logger.error('API', msg);
+      } else if (res.statusCode >= 400 && res.getHeader('X-Stream-Mode') !== 'bytevc2-progressive') {
+        logger.warn('API', msg);
+      } else {
+        logger.info('API', msg);
+      }
+    });
+  }
+  next();
+});
+
 app.use((req, res, next) => {
   const normalizedPath = req.path.toLowerCase();
   const port = req.socket?.localPort;
@@ -52,25 +71,6 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '64kb' }));
-
-// 核心 API 请求访问与耗时日志中间件 (用于日常排错与运行诊断)
-app.use((req, res, next) => {
-  if (req.path.toLowerCase().startsWith('/api/')) {
-    const t0 = Date.now();
-    res.on('finish', () => {
-      const duration = Date.now() - t0;
-      const msg = `${req.method} ${req.originalUrl || req.url} -> ${res.statusCode} (${duration}ms)`;
-      if (res.statusCode >= 500) {
-        logger.error('API', msg);
-      } else if (res.statusCode >= 400 && res.getHeader('X-Stream-Mode') !== 'bytevc2-progressive') {
-        logger.warn('API', msg);
-      } else {
-        logger.info('API', msg);
-      }
-    });
-  }
-  next();
-});
 
 // 静态前端资源目录
 const clientDir = path.join(__dirname, '../client');

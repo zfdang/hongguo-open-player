@@ -204,9 +204,11 @@
           if (previous.mode !== 'rtl' || y >= previous.y + previous.height || y + cmt.height <= previous.y) continue;
           var previousStart = this.media ? previous.time : previous._utc;
           var end = Math.min(start + duration, previousStart + duration);
-          var gapNow = xAt(cmt, ct) - xAt(previous, ct) - previous.width;
-          var gapEnd = xAt(cmt, end) - xAt(previous, end) - previous.width;
-          if (Math.min(gapNow, gapEnd) < 8) { available = false; break; }
+          var cmtAhead = (xAt(cmt, ct) - xAt(previous, ct) - previous.width >= 8) &&
+                         (xAt(cmt, end) - xAt(previous, end) - previous.width >= 8);
+          var prevAhead = (xAt(previous, ct) - xAt(cmt, ct) - cmt.width >= 8) &&
+                          (xAt(previous, end) - xAt(cmt, end) - cmt.width >= 8);
+          if (!cmtAhead && !prevAhead) { available = false; break; }
         }
         if (available) return y;
       }
@@ -607,6 +609,15 @@
   };
   Danmaku.prototype.resize = function() {
     return resize.call(this);
+  };
+  Danmaku.prototype.play = function() {
+    return play.call(this);
+  };
+  Danmaku.prototype.pause = function() {
+    return pause.call(this);
+  };
+  Danmaku.prototype.seek = function() {
+    return seek.call(this);
   };
   Object.defineProperty(Danmaku.prototype, 'speed', speed);
 
