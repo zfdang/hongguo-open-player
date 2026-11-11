@@ -6,7 +6,7 @@ const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.us
 const isDesktop = /Electron\//.test(navigator.userAgent);
 document.documentElement.classList.add(isDesktop ? (isMac ? 'platform-mac' : /Windows/i.test(navigator.userAgent) ? 'platform-win' : 'platform-linux') : 'platform-browser');
 
-createApp({
+const app = createApp({
   setup() {
     // 视图模式与导航状态
     const viewMode = ref('catalog'); // 'catalog' | 'theater'
@@ -121,6 +121,8 @@ createApp({
     const seasonsCache = new Map();
     let currentSeasonsRequest = 0;
     const showAppMenu = ref(false);
+    const currentDeviceId = ref('');
+    const isResettingDevice = ref(false);
     const danmakuEnabled = ref(true);
     const showDanmakuSettings = ref(false);
     const danmakuLayer = ref(null);
@@ -421,6 +423,40 @@ createApp({
       showAppMenu.value = false;
     }
 
+    async function fetchDeviceInfo() {
+      try {
+        const response = await fetch('/api/device');
+        const data = await response.json();
+        if (data?.device_id) {
+          currentDeviceId.value = data.device_id;
+        }
+      } catch (_) {}
+    }
+
+    async function resetDevice() {
+      showAppMenu.value = false;
+      if (isResettingDevice.value) return;
+      isResettingDevice.value = true;
+      notify('正在向官方注册并生成新设备...');
+      try {
+        const response = await fetch('/api/device/reset', { method: 'POST' });
+        const data = await response.json();
+        if (data?.success && data?.device?.device_id) {
+          currentDeviceId.value = data.device.device_id;
+          notify(`已生成新设备 ID: ${data.device.device_id}`);
+          if (viewMode.value === 'theater' && typeof loadDanmaku === 'function') {
+            loadDanmaku(true);
+          }
+        } else {
+          notify(data?.error || '生成新设备失败，请稍后重试');
+        }
+      } catch (err) {
+        notify('生成新设备网络异常: ' + (err.message || '请重试'));
+      } finally {
+        isResettingDevice.value = false;
+      }
+    }
+
     function openAboutModal() {
       showAppMenu.value = false;
       showAboutModal.value = true;
@@ -428,6 +464,7 @@ createApp({
         if (!res.ok) throw new Error('version unavailable');
         return res.json();
       }).then(data => { appVersion.value = typeof data.version === 'string' ? data.version : ''; }).catch(() => { appVersion.value = ''; });
+      fetchDeviceInfo();
     }
 
     function closeAboutModal() {
@@ -1957,6 +1994,7 @@ createApp({
     }
 
     onMounted(() => {
+      fetchDeviceInfo();
       loadPreferences();
       loadSearchHistory();
       loadCatalog();
@@ -2125,7 +2163,15 @@ createApp({
       closeShortcutsModal,
       openLogDir,
       openLogFile,
-      openGithubRepo
+      openGithubRepo,
+      resetDevice,
+      currentDeviceId,
+      isResettingDevice
     };
   }
-}).mount('#app');
+});
+if (typeof window !== 'undefined') {
+  window.__app = app.mount('#app');
+} else {
+  app.mount('#app');
+}

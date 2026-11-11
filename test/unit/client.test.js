@@ -853,6 +853,7 @@ test('index.html layout includes header hamburger menu button, dropdown menu, an
   assert.ok(html.includes('class="header-menu-container"'), 'Header menu container must exist');
   assert.ok(html.includes('class="header-menu-btn"'), 'Header hamburger menu button must exist');
   assert.ok(html.includes('class="header-dropdown-menu"'), 'Dropdown menu must exist');
+  assert.ok(html.includes('resetDevice'), 'Reset device menu item must exist');
   assert.ok(html.includes('openShortcutsModal'), 'Shortcuts item must exist');
   assert.ok(html.includes('openLogDir'), 'Open log dir item must exist');
   assert.ok(html.includes('openLogFile'), 'Open log file item must exist');
@@ -899,6 +900,26 @@ test('app menu toggles and modals open and close correctly', async () => {
 
   await state.openLogFile();
   assert.equal(fetchPostUrl, '/api/system/open-log-file');
+  assert.equal(state.showAppMenu.value, false);
+});
+
+test('resetDevice triggers POST /api/device/reset and updates currentDeviceId', async () => {
+  let requestedUrl = null;
+  const state = client(async (url, opts) => {
+    requestedUrl = url;
+    if (url === '/api/device/reset') {
+      return response({ success: true, device: { device_id: '999888777' } });
+    }
+    if (url === '/api/device') {
+      return response({ success: true, device_id: '123456789' });
+    }
+    return response([]);
+  });
+
+  state.showAppMenu.value = true;
+  await state.resetDevice();
+  assert.equal(requestedUrl, '/api/device/reset');
+  assert.equal(state.currentDeviceId.value, '999888777');
   assert.equal(state.showAppMenu.value, false);
 });
 

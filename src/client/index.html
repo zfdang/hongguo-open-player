@@ -71,6 +71,10 @@
 
           <!-- 下拉菜单 -->
           <div v-if="showAppMenu" class="header-dropdown-menu" @click.stop>
+            <button class="dropdown-item" @click="resetDevice" :disabled="isResettingDevice">
+              <span class="dropdown-icon">🔄</span>
+              <span class="dropdown-label">{{ isResettingDevice ? '正在生成新设备...' : '生成新的设备ID' }}</span>
+            </button>
             <button class="dropdown-item" @click="openShortcutsModal">
               <span class="dropdown-icon">⌨️</span>
               <span class="dropdown-label">快捷键指南</span>
@@ -938,6 +942,10 @@
             <span class="about-tag">⚡ 智能节点加速</span>
           </div>
           <div class="about-meta-list">
+            <div class="about-meta-item">
+              <span class="meta-label">设备标识：</span>
+              <span class="meta-value" style="font-family: monospace; font-size: 12px; user-select: text;">{{ currentDeviceId || '获取中...' }}</span>
+            </div>
             <div class="about-meta-item">
               <span class="meta-label">开源许可：</span>
               <span class="meta-value">GPL-3.0 License</span>

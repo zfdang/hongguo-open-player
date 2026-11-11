@@ -183,3 +183,49 @@ test('near-end prefetch endpoint requires a session and validates the episode', 
     ['124', 'auto', true, 45000, ['125', '126']]
   ]);
 });
+
+test('device API returns current device and supports manual reset to rotate device ID', async t => {
+  const appSource = require('../../src/server/native/app-source');
+  const originalRequest = appSource.requestJson;
+  let registerSeq = 1;
+  appSource.requestJson = async (url) => {
+    if (url.includes('device_register')) {
+      const id = String(800000000000000 + registerSeq++);
+      const res = { device_id_str: id, install_id_str: id, code: 0 };
+      Object.defineProperty(res, '_headers', {
+        value: { 'set-cookie': [`install_id=${id}; Path=/`] },
+        enumerable: false
+      });
+      return res;
+    }
+    return { code: 0 };
+  };
+  t.after(() => { appSource.requestJson = originalRequest; });
+
+  const { server, port } = await startServer(0);
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${port}`;
+  const home = await fetch(base);
+  const cookie = home.headers.get('set-cookie').split(';')[0];
+  const options = { headers: { Cookie: cookie } };
+
+  // 1. GET /api/device
+  const getRes = await fetch(`${base}/api/device`, options);
+  assert.equal(getRes.status, 200);
+  const initialDevice = await getRes.json();
+  assert.equal(initialDevice.success, true);
+  assert.ok(/^\d{10,30}$/.test(initialDevice.device_id));
+
+  // 2. POST /api/device/reset
+  const resetRes = await fetch(`${base}/api/device/reset`, { method: 'POST', ...options });
+  assert.equal(resetRes.status, 200);
+  const resetData = await resetRes.json();
+  assert.equal(resetData.success, true);
+  assert.ok(/^\d{10,30}$/.test(resetData.device.device_id));
+  assert.notEqual(resetData.device.device_id, initialDevice.device_id);
+
+  // 3. Subsequent GET /api/device should return the new device
+  const afterRes = await fetch(`${base}/api/device`, options);
+  const afterDevice = await afterRes.json();
+  assert.equal(afterDevice.device_id, resetData.device.device_id);
+});

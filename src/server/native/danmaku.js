@@ -109,10 +109,6 @@ async function resolveDeviceIdentity() {
   try {
     const registered = await getPlaybackDevice(requestJson);
     if (registered?.device_id && registered?.iid) {
-      // 若当前处于静态基准保底设备（该设备在部分剧目弹幕接口受限），弹幕降级使用本机独立标识
-      if (registered.device_id === '1624456208323876') {
-        return deviceIdentity();
-      }
       return { deviceId: String(registered.device_id), installId: String(registered.iid) };
     }
   } catch (_) {

@@ -175,6 +175,7 @@ function createPlaybackDeviceRegistrar(options = {}) {
         // Concurrent playback/search requests share registration. Retries reuse the
         // same encrypted payload and identity, including after an exhausted attempt.
         registration ||= Promise.resolve().then(async () => {
+            const req = requestJson || require('./app-source').requestJson;
             request ||= createRegistrationRequest();
             logger.info('PlaybackDevice', `开始匿名设备注册, cdid=${request.cdid}`);
             const deadline = Date.now() + 8000;
@@ -182,7 +183,7 @@ function createPlaybackDeviceRegistrar(options = {}) {
                 try {
                     const budget = deadline - Date.now();
                     if (budget <= 0) throw Object.assign(new Error('Registration timed out'), { code: 'ETIMEDOUT' });
-                    const response = await requestJson(REGISTER_URL, request.options,
+                    const response = await req(REGISTER_URL, request.options,
                         Date.now() + budget, AbortSignal.timeout(budget));
                     if (Number(response?.code ?? response?.Code ?? 0) !== 0) {
                         throw Object.assign(new Error('Registration rejected'), { code: 'REGISTRATION_REJECTED' });
@@ -236,6 +237,31 @@ function createPlaybackDeviceRegistrar(options = {}) {
         });
         return waitForRegistration(registration, signal);
     };
+
+    registrar.rotateDevice = async function rotateDevice(requestJson, signal) {
+        if (signal?.aborted) return Promise.reject(signal.reason);
+        registration = undefined;
+        request = undefined;
+        currentDevice = undefined;
+        if (persist) {
+            removePersistedDevice(deviceFilePath);
+        }
+        logger.info('PlaybackDevice', '收到用户主动更换设备指令，开始注册全新的独立匿名设备...');
+        return registrar(requestJson, signal);
+    };
+
+    registrar.getCurrentDevice = function getCurrentDevice() {
+        if (currentDevice) return currentDevice;
+        if (persist) {
+            const loaded = loadPersistedDevice(deviceFilePath);
+            if (loaded && loaded.device_id !== DEFAULT_VERIFIED_DEVICE.device_id) {
+                currentDevice = loaded;
+                return currentDevice;
+            }
+        }
+        return null;
+    };
+
     registrar.fallbackToDefault = function fallbackToDefault() {
         currentDevice = DEFAULT_VERIFIED_DEVICE;
         registration = undefined;

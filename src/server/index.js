@@ -96,6 +96,52 @@ app.get('/api/system/version', (_req, res) => {
   res.json({ version: require('../../package.json').version });
 });
 
+/**
+ * 获取当前活跃匿名设备信息
+ */
+app.get('/api/device', async (_req, res) => {
+  try {
+    const { getPlaybackDevice } = require('./native/playback-device');
+    const { requestJson } = require('./native/app-source');
+    const device = await getPlaybackDevice(requestJson);
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      success: true,
+      device_id: device.device_id,
+      iid: device.iid,
+      created_at: device.created_at
+    });
+  } catch (err) {
+    sendApiError(res, err);
+  }
+});
+
+/**
+ * 用户主动生成并切换新设备
+ */
+app.post('/api/device/reset', async (_req, res) => {
+  try {
+    const { getPlaybackDevice } = require('./native/playback-device');
+    const { requestJson } = require('./native/app-source');
+    const danmakuService = require('./native/danmaku');
+    logger.info('Device', '收到用户主动更换设备指令，开始注册全新的独立匿名设备...');
+    const newDevice = await getPlaybackDevice.rotateDevice(requestJson);
+    danmakuService.resetDanmakuCache();
+    logger.info('Device', `新设备生成成功: device_id=${newDevice.device_id}, iid=${newDevice.iid}`);
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      success: true,
+      device: {
+        device_id: newDevice.device_id,
+        iid: newDevice.iid,
+        created_at: newDevice.created_at
+      }
+    });
+  } catch (err) {
+    sendApiError(res, err);
+  }
+});
+
 app.get('/api/danmaku/:seriesId/:vid', async (req, res) => {
   const { seriesId, vid } = req.params;
   if (!/^\d{6,30}$/.test(seriesId) || !/^\d{6,30}$/.test(vid)) return res.status(400).json({ error: '剧集编号无效' });

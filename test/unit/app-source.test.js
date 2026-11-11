@@ -166,7 +166,7 @@ test('fetchAppPlayUrl retries on EMPTY_RESPONSE from upstream API', async () => 
   }
 });
 
-test('fetchAppPlayUrl self-heals by falling back to verified default device when both endpoints return EMPTY_RESPONSE', async () => {
+test('fetchAppPlayUrl falls back to shortplay channel with same device when primary and secondary endpoints return EMPTY_RESPONSE', async () => {
   const originalRequest = appSource.requestJson;
   appSource.clearEntryCache();
   const urls = [];
@@ -180,7 +180,7 @@ test('fetchAppPlayUrl self-heals by falling back to verified default device when
       // Primary and secondary fail for current registered device (999)
       throw Object.assign(new Error('App upstream returned empty response'), { code: 'EMPTY_RESPONSE' });
     }
-    // Succeeded on retry with verified default device
+    // Succeeded on shortplay fallback with the same registered device
     return {
       code: 0,
       data: {
@@ -195,7 +195,8 @@ test('fetchAppPlayUrl self-heals by falling back to verified default device when
     assert.equal(urls.length, 3);
     assert.ok(urls[0].includes('reading.snssdk.com'));
     assert.ok(urls[1].includes('api5-normal-sinfonlinea.fqnovel.com'));
-    assert.ok(urls[2].includes('device_id=1624456208323876'), 'Fallback request should use DEFAULT_VERIFIED_DEVICE');
+    assert.ok(urls[2].includes('novel/player/video_model/v1/'));
+    assert.ok(urls[2].includes('device_id=999'), 'Fallback request should use the same active device');
   } finally {
     appSource.requestJson = originalRequest;
     appSource.clearEntryCache();

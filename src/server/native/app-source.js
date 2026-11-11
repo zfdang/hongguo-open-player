@@ -8,7 +8,7 @@
 const crypto = require('node:crypto');
 const { gzipSync } = require('node:zlib');
 const logger = require('../services/logger');
-const { getPlaybackDevice, DEFAULT_VERIFIED_DEVICE } = require('./playback-device');
+const { getPlaybackDevice } = require('./playback-device');
 const sm3 = require('./sm3');
 const { PlayerSigner } = require('./argus');
 const { normalizeDownloadQuality, meetsDownloadQuality } = require('./download-quality');
@@ -236,16 +236,34 @@ function signedSearchRequest({ keyword, page = 1, cursor = null, identity } = {}
 // Catalogue cursors belong to one anonymous identity; keep it in memory for this process only.
 const metadataDevice = { ...DEVICE, version_code: '73532', version_name: '7.3.5.32', manifest_version_code: '73532',
     update_version_code: '73532', pv_player: '73532', iid: localId(), device_id: localId() };
+function getActiveMetadataDevice() {
+    const current = typeof getPlaybackDevice.getCurrentDevice === 'function' ? getPlaybackDevice.getCurrentDevice() : null;
+    if (current?.device_id && current?.iid) {
+        return {
+            ...DEVICE,
+            version_code: '73532',
+            version_name: '7.3.5.32',
+            manifest_version_code: '73532',
+            update_version_code: '73532',
+            pv_player: '73532',
+            iid: current.iid,
+            device_id: current.device_id,
+            cdid: current.cdid || metadataDevice.cdid,
+        };
+    }
+    return metadataDevice;
+}
 function signedMetadataRequest(apiPath, values = {}, payload = null) {
     if (!['/reading/distribution/category/landpage/v/', '/reading/bookapi/bookmall/cell/change/v', '/reading/user/celebrity/homepage/v1/', '/reading/user/celebrity/works/v1/'].includes(apiPath)) {
         throw new Error('不支持的 App 目录接口');
     }
+    const targetDevice = getActiveMetadataDevice();
     const body = payload === null ? null : Buffer.from(JSON.stringify(payload));
     const khronos = Math.floor(Date.now() / 1000), ticketBase = Date.now();
     let query, url, requestTicket;
     for (let n = 0; n < 128; n += 1) {
         requestTicket = ticketBase + n;
-        query = pythonUrlEncode({ ...values, ...metadataDevice, ts: String(khronos), _rticket: String(requestTicket) });
+        query = pythonUrlEncode({ ...values, ...targetDevice, ts: String(khronos), _rticket: String(requestTicket) });
         url = `https://api5-normal-sinfonlineb.fqnovel.com${apiPath}?${query}`;
         if (branchOf(url, body, khronos) === 0) break;
         if (n === 127) throw new Error('无法生成 App 目录请求签名');
@@ -256,7 +274,7 @@ function signedMetadataRequest(apiPath, values = {}, payload = null) {
         'x-ss-req-ticket': String(requestTicket), 'x-khronos': String(khronos),
         'x-gorgon': xGorgon(query, body, khronos, Math.floor(Math.random() * 65536)),
         'x-ladon': be32(khronos).toString('base64'), 'x-argus': le32(khronos).toString('base64'),
-        'x-helios': helios(khronos), 'x-medusa': buildMedusa(url, body, khronos, metadataDevice), 'x-tt-dt': '',
+        'x-helios': helios(khronos), 'x-medusa': buildMedusa(url, body, khronos, targetDevice), 'x-tt-dt': '',
     };
     if (body) { headers['Content-Type'] = 'application/json; charset=utf-8'; headers['x-ss-stub'] = md5(body); }
     return { url, headers, body };
@@ -507,54 +525,19 @@ async function fetchAppPlayUrl(vid, options = {}) {
                 response = await execRequestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
             } catch (fallbackErr) {
                 signal.throwIfAborted();
-                if (fallbackErr.code === 'EMPTY_RESPONSE' && typeof getPlaybackDevice.fallbackToDefault === 'function' && DEFAULT_VERIFIED_DEVICE && device?.device_id !== DEFAULT_VERIFIED_DEVICE.device_id) {
-                    logger.warn('AppSource', '播放接口主备通道均返回空响应，自动切换至基准设备重试...');
-                    const fallbackDevice = getPlaybackDevice.fallbackToDefault();
-                    signed = playbackRequest(payload, fallbackDevice, VIDEO_API);
-                    try {
-                        response = await execRequestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
-                    } catch (retryErr) {
-                        signal.throwIfAborted();
-                        if (retryErr.code === 'EMPTY_RESPONSE') {
-                            signed = playbackRequest(payload, fallbackDevice, VIDEO_API_FALLBACK);
-                            try {
-                                response = await execRequestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
-                            } catch (secondFallbackErr) {
-                                signal.throwIfAborted();
-                                // 终极降级：尝试番茄小说客户端短剧接口 (aid: 1967)
-                                try {
-                                    logger.warn('AppSource', '红果接口主备及基准设备均受阻，降级至番茄小说短剧备用通道...');
-                                    const shortSigned = shortplayRequest(vid, fallbackDevice);
-                                    const shortResp = await execRequestJson(shortSigned.url, { method: 'POST', headers: shortSigned.headers, data: shortSigned.body }, deadline, signal);
-                                    const entry = shortResp?.data?.[vid] || (shortResp?.data?.video_model ? shortResp.data : null);
-                                    if (entry) {
-                                        response = { code: 0, data: { [vid]: entry } };
-                                    } else {
-                                        throw secondFallbackErr;
-                                    }
-                                } catch (_) {
-                                    throw secondFallbackErr;
-                                }
-                            }
-                        } else {
-                            throw retryErr;
-                        }
-                    }
-                } else {
-                    // 尝试番茄小说客户端短剧接口 (aid: 1967)
-                    try {
-                        logger.warn('AppSource', '红果接口受阻，降级至番茄小说短剧备用通道...');
-                        const shortSigned = shortplayRequest(vid, device);
-                        const shortResp = await execRequestJson(shortSigned.url, { method: 'POST', headers: shortSigned.headers, data: shortSigned.body }, deadline, signal);
-                        const entry = shortResp?.data?.[vid] || (shortResp?.data?.video_model ? shortResp.data : null);
-                        if (entry) {
-                            response = { code: 0, data: { [vid]: entry } };
-                        } else {
-                            throw fallbackErr;
-                        }
-                    } catch (_) {
+                // 终极降级：尝试番茄小说客户端短剧接口 (aid: 1967)，使用同一个设备
+                try {
+                    logger.warn('AppSource', '红果接口受阻，降级至番茄小说短剧备用通道...');
+                    const shortSigned = shortplayRequest(vid, device);
+                    const shortResp = await execRequestJson(shortSigned.url, { method: 'POST', headers: shortSigned.headers, data: shortSigned.body }, deadline, signal);
+                    const entry = shortResp?.data?.[vid] || (shortResp?.data?.video_model ? shortResp.data : null);
+                    if (entry) {
+                        response = { code: 0, data: { [vid]: entry } };
+                    } else {
                         throw fallbackErr;
                     }
+                } catch (_) {
+                    throw fallbackErr;
                 }
             }
         } else {
