@@ -403,6 +403,10 @@
                     <button v-for="rate in ['0.75', '1.0', '1.25', '1.5', '2.0']" :key="rate" :class="{ active: playbackRate === rate }" :aria-pressed="playbackRate === rate" @click="selectSpeed(rate)">{{ rate }}x <span v-if="playbackRate === rate" aria-hidden="true">✓</span></button>
                   </div>
                 </div>
+                <!-- 视频清晰度/分辨率标签 -->
+                <div v-if="resolutionText" class="resolution-badge" :title="resolutionTitle" aria-label="当前分辨率">
+                  {{ resolutionText }}
+                </div>
                 <!-- 音量 -->
                 <div class="volume-box">
                   <button class="ctrl-btn volume-btn" @click="toggleMute">{{ isMuted ? '🔇' : '🔊' }}</button>
@@ -411,14 +415,6 @@
                 <!-- 全屏 -->
                 <button class="ctrl-btn" @click="toggleFullscreen" title="全屏 (F)">⛶</button>
               </div>
-            </div>
-
-            <!-- 键盘快捷键提示小条 -->
-            <div class="keyboard-hints">
-              <span>快捷键：[空格] 播放/暂停</span>
-              <span>[↑/↓] 上下集切换</span>
-              <span>[←/→] 快退/快进 5s</span>
-              <span>[F] 或 [双击] 全屏</span>
             </div>
           </div>
         </div>

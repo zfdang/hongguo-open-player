@@ -401,7 +401,7 @@ async function parseEntryPlayInfo(vid, entry, requestedQuality, allowLowerQualit
     const hasCompatibleCodec = candidates.some(row => row.codecRank < 2);
     const rows = candidates.filter(row => row.codecRank < (hasCompatibleCodec ? 2 : 3)
         && (allowLowerQuality || meetsDownloadQuality(row, requestedQuality))).sort((a, b) => {
-        if (requestedQuality === 'auto') return a.codecRank - b.codecRank || b.pixels - a.pixels;
+        if (requestedQuality === 'auto') return b.pixels - a.pixels || a.codecRank - b.codecRank;
         const aMeets = meetsDownloadQuality(a, requestedQuality), bMeets = meetsDownloadQuality(b, requestedQuality);
         if (aMeets !== bMeets) return Number(bMeets) - Number(aMeets);
         const aPixels = Math.min(a.width, a.height), bPixels = Math.min(b.width, b.height);

@@ -68,6 +68,29 @@ createApp({
     }
     const volume = ref(1.0);
     const isMuted = ref(false);
+    const videoResolution = ref({ width: 0, height: 0 });
+
+    const resolutionText = computed(() => {
+      const w = videoResolution.value.width;
+      const h = videoResolution.value.height;
+      if (!w || !h) return '';
+      const minDim = Math.min(w, h);
+      if (minDim >= 2160) return '4K';
+      if (minDim >= 1440) return '2K';
+      if (minDim >= 1080) return '1080p';
+      if (minDim >= 720) return '720p';
+      if (minDim >= 540) return '540p';
+      if (minDim >= 480) return '480p';
+      if (minDim >= 360) return '360p';
+      return `${minDim}p`;
+    });
+
+    const resolutionTitle = computed(() => {
+      const w = videoResolution.value.width;
+      const h = videoResolution.value.height;
+      if (!w || !h) return '分辨率加载中';
+      return `当前视频分辨率：${w} × ${h} (${resolutionText.value})`;
+    });
     const watchedMap = ref(new Map()); // seriesId -> Set(epIndexes)
     let progressTimer = null;
     let pendingResumeSec = 0;
@@ -1306,8 +1329,9 @@ createApp({
     function leaveTheater() {
       theaterRequest++;
       saveProgressNow();
-      if (videoEl.value) videoEl.value.pause();
+      if (videoEl.value && typeof videoEl.value.pause === 'function') videoEl.value.pause();
       resetPlayback();
+      videoResolution.value = { width: 0, height: 0 };
       setControlsHidden(false);
       clearTimeout(controlsHideTimer);
       showDramaDetailModal.value = false;
@@ -1561,6 +1585,12 @@ createApp({
     function onCanPlay(event) {
       if (event && event.target !== videoEl.value) return;
       isBuffering.value = false;
+      if (videoEl.value?.videoWidth && videoEl.value?.videoHeight) {
+        videoResolution.value = {
+          width: videoEl.value.videoWidth,
+          height: videoEl.value.videoHeight
+        };
+      }
     }
 
     function onPause(event) {
@@ -1577,6 +1607,12 @@ createApp({
       if (videoEl.value) {
         progressReady = true;
         duration.value = videoEl.value.duration || 0;
+        if (videoEl.value.videoWidth && videoEl.value.videoHeight) {
+          videoResolution.value = {
+            width: videoEl.value.videoWidth,
+            height: videoEl.value.videoHeight
+          };
+        }
         videoEl.value.volume = Number(volume.value);
         videoEl.value.muted = isMuted.value;
         if (navigator.mediaSession && typeof MediaMetadata !== 'undefined') {
@@ -1976,6 +2012,7 @@ createApp({
       playbackRate, showSpeedMenu, selectSpeed,
       volume,
       isMuted,
+      videoResolution, resolutionText, resolutionTitle,
       currentGroup,
       currentStreamUrl,
       episodeGroups,

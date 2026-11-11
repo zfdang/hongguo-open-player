@@ -201,3 +201,58 @@ test('fetchAppPlayUrl self-heals by falling back to verified default device when
     appSource.clearEntryCache();
   }
 });
+
+test('fetchAppPlayUrl selects highest resolution when multiple streams of different definitions exist', async () => {
+  const originalRequest = appSource.requestJson;
+  appSource.clearEntryCache();
+  const entry = {
+    video_model: JSON.stringify({
+      video_list: [
+        {
+          definition: '720p',
+          vtype: 'mp4',
+          codec_type: 'h264',
+          main_url: 'https://qznovelvod.com/video_720.mp4',
+          vwidth: 720,
+          vheight: 1280,
+          encrypt_info: { encrypt: false }
+        },
+        {
+          definition: '1080p',
+          vtype: 'mp4',
+          codec_type: 'bytevc1',
+          main_url: 'https://qznovelvod.com/video_1080.mp4',
+          vwidth: 1080,
+          vheight: 1920,
+          encrypt_info: { encrypt: false }
+        },
+        {
+          definition: '540p',
+          vtype: 'mp4',
+          codec_type: 'h264',
+          main_url: 'https://qznovelvod.com/video_540.mp4',
+          vwidth: 540,
+          vheight: 960,
+          encrypt_info: { encrypt: false }
+        }
+      ]
+    })
+  };
+
+  appSource.requestJson = async (url) => {
+    if (url.includes('register')) {
+      return { code: 0, device_id_str: '999', install_id_str: '888' };
+    }
+    return { code: 0, data: { '40001': entry } };
+  };
+
+  try {
+    const play = await appSource.fetchAppPlayUrl('40001', { quality: 'auto' });
+    assert.equal(play.quality, '1080p');
+    assert.equal(play.url, 'https://qznovelvod.com/video_1080.mp4');
+    assert.equal(play.codec, 'hevc');
+  } finally {
+    appSource.requestJson = originalRequest;
+    appSource.clearEntryCache();
+  }
+});
