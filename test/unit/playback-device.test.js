@@ -226,7 +226,7 @@ test('fallbackToDefault switches to DEFAULT_VERIFIED_DEVICE and updates disk', a
   }
 });
 
-test('rotateDevice unlinks existing device, registers fresh identity, and persists to disk', async () => {
+test('rotateDevice registers fresh identity and replaces the persisted device', async () => {
   const os = require('node:os');
   const path = require('node:path');
   const fs = require('node:fs');
@@ -274,6 +274,29 @@ test('rotateDevice unlinks existing device, registers fresh identity, and persis
     assert.equal(onDisk.device_id, '999999999999999');
     assert.equal(onDisk.iid, '888888888888888');
   } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('rotateDevice preserves the old device when registration fails', async () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-rotate-fail-'));
+  const previousEnv = process.env.NODE_ENV;
+  try {
+    const existing = { device_id: '111111111111111', iid: '222222222222222', cdid: 'old-device', created_at: 1700000000000 };
+    const file = path.join(tmpDir, 'device.json');
+    fs.writeFileSync(file, JSON.stringify(existing));
+    const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
+    await getDevice();
+    process.env.NODE_ENV = 'production';
+    await assert.rejects(getDevice.rotateDevice(async () => { throw Object.assign(new Error('rejected'), { code: 'REGISTRATION_REJECTED' }); }), { code: 'DEVICE_REGISTRATION_FAILED' });
+    assert.equal((await getDevice()).device_id, existing.device_id);
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), existing);
+  } finally {
+    if (previousEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousEnv;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

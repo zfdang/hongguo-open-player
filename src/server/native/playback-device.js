@@ -59,7 +59,7 @@ function loadPersistedDevice(filePath) {
     return null;
 }
 
-function savePersistedDevice(filePath, device) {
+function savePersistedDevice(filePath, device, strict = false) {
     try {
         const dir = path.dirname(filePath);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -68,6 +68,7 @@ function savePersistedDevice(filePath, device) {
         fs.renameSync(tmpPath, filePath);
     } catch (e) {
         logger.warn('PlaybackDevice', `持久化设备文件失败: ${e.message}`);
+        if (strict) throw e;
     }
 }
 
@@ -153,6 +154,7 @@ function createPlaybackDeviceRegistrar(options = {}) {
     let registration;
     let request;
     let currentDevice;
+    let rotation;
     const persist = options.persist ?? (process.env.NODE_ENV !== 'test');
     const deviceFilePath = getDeviceFilePath(options.dataDir);
 
@@ -172,6 +174,7 @@ function createPlaybackDeviceRegistrar(options = {}) {
                 logger.info('PlaybackDevice', `检测到老用户本地使用基准静态设备 (device_id=${loaded.device_id})，准备自动迁移升级为独立注册设备...`);
             }
         }
+        if (rotation) return waitForRegistration(rotation, signal);
         // Concurrent playback/search requests share registration. Retries reuse the
         // same encrypted payload and identity, including after an exhausted attempt.
         registration ||= Promise.resolve().then(async () => {
@@ -226,7 +229,7 @@ function createPlaybackDeviceRegistrar(options = {}) {
             const reason = error.status ? `HTTP ${error.status}` : error.code || 'INVALID_RESPONSE';
             logger.error('PlaybackDevice', `匿名设备注册失败: ${reason}`);
             // 生产环境下（非单测环境），注册失败时降级使用基准设备保底，确保播放器正常启动
-            if (process.env.NODE_ENV !== 'test') {
+            if (options.fallback !== false && process.env.NODE_ENV !== 'test') {
                 logger.warn('PlaybackDevice', `匿名设备注册暂不可用（${reason}），自动降级使用基准播放设备保底`);
                 currentDevice = DEFAULT_VERIFIED_DEVICE;
                 return currentDevice;
@@ -240,14 +243,21 @@ function createPlaybackDeviceRegistrar(options = {}) {
 
     registrar.rotateDevice = async function rotateDevice(requestJson, signal) {
         if (signal?.aborted) return Promise.reject(signal.reason);
-        registration = undefined;
-        request = undefined;
-        currentDevice = undefined;
-        if (persist) {
-            removePersistedDevice(deviceFilePath);
+        if (!rotation) {
+            rotation = (async () => {
+                // Let an earlier registration finish before replacing its result.
+                if (registration) await registration.catch(() => {});
+                logger.info('PlaybackDevice', '收到用户主动更换设备指令，开始注册全新的独立匿名设备...');
+                const candidate = createPlaybackDeviceRegistrar({ persist: false, fallback: false });
+                const newDevice = await candidate(requestJson);
+                if (persist) savePersistedDevice(deviceFilePath, newDevice, true);
+                currentDevice = newDevice;
+                registration = undefined;
+                request = undefined;
+                return newDevice;
+            })().finally(() => { rotation = undefined; });
         }
-        logger.info('PlaybackDevice', '收到用户主动更换设备指令，开始注册全新的独立匿名设备...');
-        return registrar(requestJson, signal);
+        return waitForRegistration(rotation, signal);
     };
 
     registrar.getCurrentDevice = function getCurrentDevice() {
