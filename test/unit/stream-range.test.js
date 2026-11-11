@@ -280,7 +280,7 @@ test('stream admission limits the number of waiting requests', async () => {
   assert.equal(service.waitingStreams.length, 0);
 });
 
-test('consecutive rapid client disconnections evict cached streaming plan and entryCache, enabling plan rebuild', async () => {
+test('rapid seek disconnections keep the same streaming plan', async () => {
   const { Writable } = require('node:stream');
   const service = new StreamService();
   const appSource = require('../../src/server/native/app-source');
@@ -306,23 +306,16 @@ test('consecutive rapid client disconnections evict cached streaming plan and en
     assert.ok(service.plans.has('vid-rapid:auto'), 'Single abort should keep plan');
     assert.equal(clearedVid, null);
 
-    // Second abort within 3 seconds (<300ms)
-    const res2 = new Writable({ write(chunk, enc, cb) { cb(); } });
-    res2.writeHead = () => {};
-    await service.handleStream({ headers: { range: 'bytes=0-50' } }, res2, 'vid-rapid');
-    assert.ok(!service.plans.has('vid-rapid:auto'), 'Consecutive rapid aborts should evict plan');
-    assert.equal(clearedVid, 'vid-rapid', 'Consecutive rapid aborts should evict entryCache');
-
-    // Next request triggers a plan rebuild rather than returning stale cached plan
-    let planRebuilt = false;
-    service.getStreamingPlan = async () => {
-      planRebuilt = true;
-      return { size: 10, bytes: 10, read: async function* () { yield Buffer.from('rebuilt012'); } };
-    };
-    const res3 = new Writable({ write(chunk, enc, cb) { cb(); } });
-    res3.writeHead = () => {};
-    await service.handleStream({ headers: { range: 'bytes=0-4' } }, res3, 'vid-rapid');
-    assert.equal(planRebuilt, true);
+    // Repeated seeks must not change the entity behind the original MP4 header.
+    for (let i = 0; i < 3; i++) {
+      const res = new Writable({ write(chunk, enc, cb) { cb(); } });
+      res.writeHead = () => {};
+      await service.handleStream({ headers: { range: 'bytes=25-50' } }, res, 'vid-rapid');
+      assert.equal(service.plans.get('vid-rapid:auto').plan, mockPlan);
+      assert.equal(clearedVid, null);
+    }
+    service.plans.get('vid-rapid:auto').expires = Date.now() - 1;
+    assert.equal(await service.getStreamingPlan('vid-rapid', 'auto', new AbortController().signal), mockPlan);
   } finally {
     appSource.clearEntryCache = originalClear;
   }

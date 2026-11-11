@@ -31,7 +31,6 @@ class StreamService {
     this.activeStreams = 0;
     this.waitingStreams = [];
     this.streamControllers = new Set();
-    this.quickAborts = new Map();
     this.consumedRefreshes = new Map();
   }
 
@@ -304,7 +303,6 @@ class StreamService {
     this.cache.clear();
     this.fragmentCache.clear();
     this.plans.clear();
-    this.quickAborts.clear();
     this.consumedRefreshes.clear();
   }
 
@@ -363,7 +361,7 @@ class StreamService {
   async getStreamingPlan(vid, quality, signal, minValidityMs = 0, nextVids = [], progressive = false) {
     const key = `${vid}:${quality}`;
     const cached = this.plans.get(key);
-    if (cached?.expires > Date.now() + minValidityMs) { this.plans.delete(key); this.plans.set(key, cached); return cached.plan; }
+    if (cached && (cached.active || cached.expires > Date.now() + minValidityMs)) { this.plans.delete(key); this.plans.set(key, cached); return cached.plan; }
     const t0 = Date.now();
     logger.info('StreamService', `开始构建流式分片播放计划: vid=${vid}, quality=${quality}`);
     const info = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, allowBytevc2: true, signal, nextVids });
@@ -377,6 +375,9 @@ class StreamService {
       signal.throwIfAborted();
       try {
         const plan = await rangeMedia.prepareRangeMedia({ ...variant, contentKey: variant.contentKey || info.contentKey }, this.requestOptions, signal);
+        // Another request may have started serving a plan while this one was preparing.
+        const active = this.plans.get(key);
+        if (active?.active) return active.plan;
         logger.info('StreamService', `流式分片计划构建完成: vid=${vid}, 大小=${plan.size} 字节, 耗时=${Date.now() - t0}ms`);
         this.plans.set(key, { plan, expires: Date.now() + 90000 });
         while (this.plans.size > 8 || [...this.plans.values()].reduce((sum, item) => sum + item.plan.bytes, 0) > this.maxPlanBytes) {
@@ -460,7 +461,6 @@ class StreamService {
         this.cache.delete(planKey);
         this.fragmentCache.delete(planKey);
         this.cache.delete(String(vid));
-        this.quickAborts.delete(planKey);
         appSource.clearEntryCache?.(vid);
         logger.info('StreamService', `收到单次有效刷新指令，已清空播放计划与模型缓存: vid=${vid}, token=${refreshToken}`);
         while (this.consumedRefreshes.size > 200) {
@@ -501,6 +501,8 @@ class StreamService {
       const progressive = req.query?.mse === '1' || req.query?.mse === 'stream';
       const plan = await this.getStreamingPlan(vid, quality, controller.signal, 0, nextVids, progressive);
       if (!plan) return await this.handleBufferedStream(req, res, vid);
+      const planEntry = this.plans.get(planKey);
+      if (planEntry?.plan === plan) planEntry.active = true;
       if (plan.bytevc2) {
         if (req.query?.mse !== 'stream') {
           res.writeHead(409, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Stream-Mode': 'bytevc2-progressive' });
@@ -570,8 +572,6 @@ class StreamService {
         error.message === 'Playback disconnected';
 
       if (!isClientAbort) {
-        this.plans.delete(planKey);
-        this.quickAborts.delete(planKey);
         logger.error('StreamService', `流媒体播放异常 vid=${vid}: ${error.message}`);
         if (!res.destroyed) {
           if (!res.headersSent) {
@@ -588,25 +588,6 @@ class StreamService {
         }
       } else {
         logger.info('StreamService', `客户端断开连接 (Seek/切集): vid=${vid}`);
-        const duration = Date.now() - t0;
-        const history = this.quickAborts.get(planKey) || { count: 0, lastTime: 0 };
-        const isRapid = duration < 300 && (Date.now() - history.lastTime < 3000);
-        if (isRapid) {
-          history.count++;
-          history.lastTime = Date.now();
-          this.quickAborts.set(planKey, history);
-          if (history.count >= 2) {
-            this.plans.delete(planKey);
-            this.plans.delete(String(vid));
-            this.cache.delete(planKey);
-            this.cache.delete(String(vid));
-            this.quickAborts.delete(planKey);
-            appSource.clearEntryCache?.(vid);
-            logger.warn('StreamService', `分集 ${vid} 连续发生快速断连 (${history.count}次)，可能为慢节点或解码受阻，已强制清除当前流计划与上游模型缓存`);
-          }
-        } else {
-          this.quickAborts.set(planKey, { count: 1, lastTime: Date.now() });
-        }
       }
     } finally {
       res.removeListener?.('close', disconnected);
