@@ -98,3 +98,71 @@ test('aborting one registration waiter does not cancel a shared registration', a
   assert.equal((await getDevice(request)).device_id, '123');
   assert.equal(calls, 1);
 });
+
+test('persisted device is loaded from disk and avoids network requests', async () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-test-'));
+  try {
+    const existing = {
+      device_id: '987654321012345',
+      iid: '123456789012345',
+      cdid: '00000000-0000-0000-0000-000000000001',
+      cookie: 'store-region=cn-bj; store-region-src=did; install_id=123456789012345; ttreq=1$fake',
+      created_at: 1700000000000
+    };
+    fs.writeFileSync(path.join(tmpDir, 'device.json'), JSON.stringify(existing), 'utf8');
+
+    let calls = 0;
+    const request = async () => { calls++; return success; };
+    const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
+    const loaded = await getDevice(request);
+
+    assert.equal(calls, 0, 'Should not make any network requests when valid device exists on disk');
+    assert.equal(loaded.device_id, '987654321012345');
+    assert.equal(loaded.iid, '123456789012345');
+    assert.equal(loaded.cdid, '00000000-0000-0000-0000-000000000001');
+    assert.equal(loaded.cookie, existing.cookie);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('new registration saves device and cookie to disk and reset removes it', async () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-test2-'));
+  try {
+    let calls = 0;
+    const request = async () => {
+      calls++;
+      const res = { device_id_str: '555', install_id_str: '666', code: 0 };
+      Object.defineProperty(res, '_headers', {
+        value: { 'set-cookie': ['store-region=cn-bj; Path=/', 'install_id=666; Path=/'] },
+        enumerable: false
+      });
+      return res;
+    };
+    const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
+    const registered = await getDevice(request);
+
+    assert.equal(calls, 1);
+    assert.equal(registered.device_id, '555');
+    assert.equal(registered.iid, '666');
+    assert.equal(registered.cookie, 'store-region=cn-bj; install_id=666');
+
+    const filePath = path.join(tmpDir, 'device.json');
+    assert.ok(fs.existsSync(filePath), 'device.json should be created');
+    const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    assert.equal(onDisk.device_id, '555');
+    assert.equal(onDisk.iid, '666');
+
+    // Reset should delete persisted disk file
+    getDevice.reset(registered);
+    assert.equal(fs.existsSync(filePath), false, 'device.json should be removed on explicit reset');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

@@ -14,7 +14,8 @@ const { normalizeDownloadQuality, meetsDownloadQuality } = require('./download-q
 const localId = () => String(1000000000000000n + BigInt('0x' + crypto.randomBytes(6).toString('hex')));
 const PROCESS_NONCE = crypto.randomBytes(18).toString('base64url');
 const PROCESS_STARTED = Date.now();
-const VIDEO_API = 'https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/';
+const VIDEO_API = 'https://reading.snssdk.com/novel/player/multi_video_model/player/v1';
+const VIDEO_API_FALLBACK = 'https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/player/v1';
 const SEARCH_API = 'https://api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/search/tab/v';
 const VIDEO_UA = 'com.phoenix.read/71332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
 const PLAYBACK_UA = 'com.phoenix.read/74332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
@@ -132,20 +133,22 @@ function helios(khronos) {
 }
 
 function branchOf(url, body, khronos) { const bodyMd5 = body ? crypto.createHash('md5').update(body).digest() : Buffer.alloc(16); const q = sm3(url.split('?')[1]); const iv = getIv(getIv(getIv(0x20230928, q), bodyMd5), le32(khronos)); const low = iv & 15; return low - (((low * 171) >> 9) * 3); }
-function playbackRequest(payload, identity) {
+function playbackRequest(payload, identity, apiBase = VIDEO_API) {
     const body = gzipSync(Buffer.from(payload));
     const khronos = Math.floor(Date.now() / 1000);
     const ticket = Date.now();
+    const { device_id, iid, cdid } = identity || {};
+    const devParams = { ...PLAYBACK_DEVICE, device_id, iid, cdid };
     let query, url, requestTicket;
     for (let n = 0; n < 128; n += 1) {
         requestTicket = String(ticket + n);
-        query = pythonUrlEncode({ ...PLAYBACK_DEVICE, ...identity, _rticket: requestTicket });
-        url = `${VIDEO_API}?${query}`;
+        query = pythonUrlEncode({ ...devParams, _rticket: requestTicket });
+        url = `${apiBase}?${query}`;
         if (branchOf(url, body, khronos) === 0) break;
         if (n === 127) throw new Error('无法生成播放请求签名');
     }
-    const device = { ...PLAYBACK_DEVICE, ...identity };
-    return { url, body, headers: {
+    const cookieHeader = identity?.cookie || (iid ? `store-region=cn-bj; store-region-src=did; install_id=${iid}` : '');
+    const headers = {
         'User-Agent': PLAYBACK_UA, Accept: 'application/json; charset=utf-8,application/x-protobuf',
         'Content-Type': 'application/json; charset=UTF-8', 'Content-Encoding': 'gzip',
         'sdk-version': '2', 'passport-sdk-version': '5051452', 'x-xs-from-web': '0',
@@ -153,8 +156,10 @@ function playbackRequest(payload, identity) {
         'x-khronos': String(khronos), 'x-ss-stub': md5(body),
         'x-gorgon': xGorgon(query, body, khronos, Math.floor(Math.random() * 65536)),
         'x-ladon': be32(khronos).toString('base64'), 'x-argus': le32(khronos).toString('base64'),
-        'x-helios': helios(khronos), 'x-medusa': buildMedusa(url, body, khronos, device),
-    } };
+        'x-helios': helios(khronos), 'x-medusa': buildMedusa(url, body, khronos, devParams),
+    };
+    if (cookieHeader) headers.Cookie = cookieHeader;
+    return { url, body, headers };
 }
 
 function parseSearchInteger(value) {
@@ -319,6 +324,14 @@ async function requestJson(url, options, deadline, signal) {
         }
         const parsed = typeof response.data === 'string' ? jsonBody(raw) : response.data;
         if (!parsed || typeof parsed !== 'object') throw Object.assign(new Error('App 接口未返回有效数据'), { code: 'INVALID_RESPONSE' });
+        if (response.headers) {
+            Object.defineProperty(parsed, '_headers', {
+                value: response.headers,
+                enumerable: false,
+                writable: true,
+                configurable: true,
+            });
+        }
         return parsed;
     }
     throw Object.assign(new Error('App 片源跳转次数过多'), { code: 'SECURITY_BLOCKED' });
@@ -446,21 +459,21 @@ async function fetchAppPlayUrl(vid, options = {}) {
     }
 
     const payload = JSON.stringify({
+        dr_scene: 'player',
         biz_param: { detail_page_version: 0, device_level: 3, disable_digg_stat: false, need_all_video_definition: true, need_mp4_align: false, use_os_player: false, use_server_dns: false, video_platform: 1024 },
         mixed_video_id_map: { '1004': batch },
     });
     const execRequestJson = (...args) => (module.exports.requestJson || requestJson)(...args);
     const device = await getPlaybackDevice(execRequestJson, signal);
-    let signed = playbackRequest(payload, device);
+    let signed = playbackRequest(payload, device, VIDEO_API);
     let response;
     try {
         response = await execRequestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
     } catch (err) {
         signal.throwIfAborted();
-        if (err.code === 'EMPTY_RESPONSE' && typeof getPlaybackDevice.reset === 'function') {
-            logger.warn('AppSource', 'App 接口返回空响应，尝试更新播放设备并重试...');
-            getPlaybackDevice.reset(device);
-            signed = playbackRequest(payload, await getPlaybackDevice(execRequestJson, signal));
+        if (err.code === 'EMPTY_RESPONSE') {
+            logger.warn('AppSource', '播放接口返回空响应，尝试备用接口重试...');
+            signed = playbackRequest(payload, device, VIDEO_API_FALLBACK);
             response = await execRequestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
         } else {
             throw err;

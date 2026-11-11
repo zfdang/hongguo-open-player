@@ -6,10 +6,58 @@
 // Changes: fixed anonymous phone profile; process-only identity; no cookies or tokens.
 const crypto = require('node:crypto');
 const { gzipSync } = require('node:zlib');
+const fs = require('node:fs');
+const path = require('node:path');
 const logger = require('../services/logger');
 
 const REGISTER_URL = 'https://log5-applog-lf.fqnovel.com/service/2/device_register/?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
 const KDF_SALT = Buffer.from('4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
+const PLAYBACK_UA = 'com.phoenix.read/74332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
+
+function getDeviceFilePath(customDir) {
+    const dataDir = customDir || process.env.HONGGUO_DATA_DIR || path.join(__dirname, '../../../data');
+    return path.join(dataDir, 'device.json');
+}
+
+function loadPersistedDevice(filePath) {
+    try {
+        if (!fs.existsSync(filePath)) return null;
+        const raw = fs.readFileSync(filePath, 'utf8');
+        const data = JSON.parse(raw);
+        if (data && typeof data === 'object' && typeof data.device_id === 'string' && /^\d{10,30}$/.test(data.device_id) && typeof data.iid === 'string' && /^\d{10,30}$/.test(data.iid) && data.cdid) {
+            return Object.freeze({
+                device_id: String(data.device_id),
+                iid: String(data.iid),
+                cdid: String(data.cdid),
+                cookie: typeof data.cookie === 'string' && data.cookie ? data.cookie : `store-region=cn-bj; store-region-src=did; install_id=${data.iid}`,
+                created_at: Number(data.created_at) || Date.now(),
+            });
+        }
+    } catch (e) {
+        logger.warn('PlaybackDevice', `读取本地设备文件失败: ${e.message}`);
+    }
+    return null;
+}
+
+function savePersistedDevice(filePath, device) {
+    try {
+        const dir = path.dirname(filePath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const tmpPath = `${filePath}.tmp.${Date.now()}`;
+        fs.writeFileSync(tmpPath, JSON.stringify(device, null, 2), 'utf8');
+        fs.renameSync(tmpPath, filePath);
+    } catch (e) {
+        logger.warn('PlaybackDevice', `持久化设备文件失败: ${e.message}`);
+    }
+}
+
+function removePersistedDevice(filePath) {
+    try {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (e) {
+        logger.warn('PlaybackDevice', `删除本地设备文件失败: ${e.message}`);
+    }
+}
 
 function responseId(response, name) {
     const preferred = response?.[`${name}_str`];
@@ -22,9 +70,9 @@ function createRegistrationRequest() {
     const now = Date.now();
     const cdid = crypto.randomUUID();
     const header = {
-        display_name: '红果免费短剧', update_version_code: 73932, manifest_version_code: 73932,
-        app_version_minor: '7.3.9.32', aid: 8662, channel: 'update_64', package: 'com.phoenix.read',
-        app_version: '7.3.9.32', version_code: 73932, sdk_version: '3.7.0-rc.34-fanqie-xiaoshuo',
+        display_name: '红果免费短剧', update_version_code: 74332, manifest_version_code: 74332,
+        app_version_minor: '7.4.3.32', aid: 8662, channel: 'update_64', package: 'com.phoenix.read',
+        app_version: '7.4.3.32', version_code: 74332, sdk_version: '3.7.0-rc.34-fanqie-xiaoshuo',
         sdk_target_version: 29, git_hash: '3a88f4e', os: 'Android', os_version: '16', os_api: 36,
         device_model: '25053RT47C', device_brand: 'Redmi', device_manufacturer: 'Redmi',
         cpu_abi: 'arm64-v8a', release_build: 'b5e187f', density_dpi: 520, display_density: 'mdpi',
@@ -49,7 +97,7 @@ function createRegistrationRequest() {
     const options = {
         method: 'POST',
         headers: {
-            'User-Agent': 'com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)',
+            'User-Agent': PLAYBACK_UA,
             Accept: 'application/json', 'Content-Type': 'application/octet-stream;tt-data=a',
             'log-encode-type': 'gzip', 'x-ss-dp': '8662', 'x-ss-req-ticket': String(now),
             'x-vc-bdturing-sdk-version': '4.0.3.cn', lc: '101', 'sdk-version': '2',
@@ -81,12 +129,24 @@ function waitForRegistration(promise, signal) {
     });
 }
 
-function createPlaybackDeviceRegistrar() {
+function createPlaybackDeviceRegistrar(options = {}) {
     let registration;
     let request;
     let currentDevice;
+    const persist = options.persist ?? (process.env.NODE_ENV !== 'test');
+    const deviceFilePath = getDeviceFilePath(options.dataDir);
+
     const registrar = function getPlaybackDevice(requestJson, signal) {
         if (signal?.aborted) return Promise.reject(signal.reason);
+        if (currentDevice) return Promise.resolve(currentDevice);
+        if (persist) {
+            const loaded = loadPersistedDevice(deviceFilePath);
+            if (loaded) {
+                currentDevice = loaded;
+                logger.info('PlaybackDevice', `已加载本地持久化设备: device_id=${currentDevice.device_id}, iid=${currentDevice.iid}`);
+                return Promise.resolve(currentDevice);
+            }
+        }
         // Concurrent playback/search requests share registration. Retries reuse the
         // same encrypted payload and identity, including after an exhausted attempt.
         registration ||= Promise.resolve().then(async () => {
@@ -105,8 +165,32 @@ function createPlaybackDeviceRegistrar() {
                     const device_id = responseId(response, 'device_id');
                     const iid = responseId(response, 'install_id');
                     if (!device_id || !iid) throw Object.assign(new Error('Invalid registration'), { code: 'INVALID_REGISTRATION' });
+
+                    const headers = response?._headers || response?.headers;
+                    const rawCookies = headers?.['set-cookie'];
+                    let cookie = '';
+                    if (Array.isArray(rawCookies)) {
+                        cookie = rawCookies.map(c => String(c).split(';')[0].trim()).filter(Boolean).join('; ');
+                    } else if (typeof rawCookies === 'string') {
+                        cookie = rawCookies.split(';')[0].trim();
+                    }
+                    if (!cookie) {
+                        cookie = `store-region=cn-bj; store-region-src=did; install_id=${iid}`;
+                    }
+
+                    const deviceObj = Object.freeze({
+                        device_id,
+                        iid,
+                        cdid: request.cdid,
+                        cookie,
+                        created_at: Date.now(),
+                    });
+                    currentDevice = deviceObj;
+                    if (persist) {
+                        savePersistedDevice(deviceFilePath, deviceObj);
+                    }
                     logger.info('PlaybackDevice', `匿名设备注册成功: device_id=${device_id}, iid=${iid}`);
-                    return currentDevice = Object.freeze({ device_id, iid, cdid: request.cdid });
+                    return currentDevice;
                 } catch (error) {
                     if (attempt === 2 || !retryable(error) || Date.now() >= deadline) throw error;
                     await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
@@ -128,6 +212,9 @@ function createPlaybackDeviceRegistrar() {
         registration = undefined;
         request = undefined;
         currentDevice = undefined;
+        if (persist) {
+            removePersistedDevice(deviceFilePath);
+        }
         return true;
     };
     return registrar;
