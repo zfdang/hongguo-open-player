@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const { gzipSync } = require('node:zlib');
 const logger = require('../services/logger');
 const { getPlaybackDevice } = require('./playback-device');
+const { deviceKey } = require('./device-session');
 const sm3 = require('./sm3');
 const { PlayerSigner } = require('./argus');
 const { normalizeDownloadQuality, meetsDownloadQuality } = require('./download-quality');
@@ -144,7 +145,6 @@ function playbackRequest(payload, identity, apiBase = VIDEO_API) {
     const query = pythonUrlEncode({ ...devParams, _rticket: requestTicket });
     const url = `${apiBase}?${query}`;
     const signerHeaders = PlayerSigner.headers(query, body, khronos);
-    const cookieHeader = identity?.cookie || (iid ? `store-region=cn-bj; store-region-src=did; install_id=${iid}` : '');
     const headers = {
         'User-Agent': PLAYBACK_UA, Accept: 'application/json; charset=utf-8,application/x-protobuf',
         'Content-Type': 'application/json; charset=UTF-8', 'Content-Encoding': 'gzip',
@@ -152,7 +152,7 @@ function playbackRequest(payload, identity, apiBase = VIDEO_API) {
         'x-ss-dp': '8662',
         ...signerHeaders,
     };
-    if (cookieHeader) headers.Cookie = cookieHeader;
+    // The transport supplies cookies scoped to the destination from the active session.
     return { url, body, headers };
 }
 
@@ -187,7 +187,7 @@ function shortplayRequest(vid, identity) {
         'Content-Type': 'application/json; charset=utf-8',
         ...signerHeaders,
     };
-    if (identity?.cookie) headers.Cookie = identity.cookie;
+    // Session cookies are added by requestJson after domain/path/expiry checks.
     return { url, body, headers };
 }
 
@@ -335,25 +335,60 @@ function checkedUrl(value, domains) {
 
 async function requestJson(url, options, deadline, signal) {
     const axios = require('axios');
+    const requestId = crypto.randomUUID();
+    const { diagnostics, ...transportOptions } = options;
+    const identity = getPlaybackDevice.matchRequest(url);
     for (let redirects = 0; redirects < 4; redirects++) {
         url = checkedUrl(url, ['fqnovel.com', 'snssdk.com']);
         const timeout = deadline - Date.now();
         if (timeout <= 0) throw Object.assign(new Error('App 片源请求超时'), { code: 'ETIMEDOUT' });
+        const target = new URL(url);
+        const started = Date.now();
+        const session = identity && getPlaybackDevice.beginRequest(identity, url);
+        const headers = { ...options.headers };
+        if (session) {
+            for (const key of Object.keys(headers)) if (key.toLowerCase() === 'cookie') delete headers[key];
+            if (session.cookie) headers.Cookie = session.cookie;
+        }
+        const context = { request_id: requestId, host: target.hostname, path: target.pathname,
+            method: options.method || 'GET',
+            ...(session ? { idle_before_request_ms: session.idle_before_request_ms,
+                sent_cookie_names: session.cookie_names, sent_cookie_count: session.cookie_count } : {}),
+            ...(diagnostics ? { playback_id: diagnostics.playback_id, vid: diagnostics.vid } : {}),
+            ...(identity ? { device_key: deviceKey(identity) } : {}) };
         let response;
         try {
             response = await axios({
-                ...options, url, timeout, signal, maxRedirects: 0,
+                ...transportOptions, headers, url, timeout, signal, maxRedirects: 0,
                 responseType: 'text', transformResponse: [(data) => data],
                 maxContentLength: 2 * 1024 * 1024, maxBodyLength: 1024 * 1024,
                 validateStatus: () => true,
             });
         } catch (error) {
             const isAborted = Boolean(signal?.aborted);
-            const code = isAborted ? 'ETIMEDOUT' : ['ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
+            const code = isAborted ? (signal.reason?.name === 'TimeoutError' ? 'ETIMEDOUT' : 'ERR_CANCELED') : ['ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
                 'ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'ERR_CANCELED'].includes(error.code) ? error.code : 'ERR_NETWORK';
+            const state = identity && getPlaybackDevice.recordResponse(identity, url, {}, code);
+            logger.warn('AppRequest', '接口网络异常', { ...context, elapsed_ms: Date.now() - started, outcome: code, ...state });
             throw Object.assign(new Error(['ECONNABORTED', 'ETIMEDOUT'].includes(code)
-                ? 'App 片源请求超时' : 'App 片源网络请求失败，请稍后重试'), { code });
+                ? 'App 片源请求超时' : 'App 片源网络请求失败，请稍后重试'), { code, requestId });
         }
+        const raw = typeof response.data === 'string' ? response.data : '';
+        const parsed = typeof response.data === 'string' ? jsonBody(raw) : response.data;
+        const businessCode = Number(parsed?.Code ?? parsed?.code ?? parsed?.status_code ?? 0);
+        const outcome = response.status !== 200 ? `HTTP_${response.status}` : !raw.trim() && typeof response.data === 'string'
+            ? 'EMPTY_RESPONSE' : !parsed || typeof parsed !== 'object' ? 'INVALID_RESPONSE'
+                : businessCode !== 0 ? 'BUSINESS_REJECTED' : 'ok';
+        const state = identity && getPlaybackDevice.recordResponse(identity, url, response.headers, outcome);
+        const logid = String(response.headers?.['x-tt-logid'] || '').slice(0, 128);
+        logger[outcome === 'ok' ? 'info' : 'warn']('AppRequest', '接口响应诊断', {
+            ...context, status: response.status, elapsed_ms: Date.now() - started,
+            response_bytes: Buffer.byteLength(raw), outcome, business_code: Number.isFinite(businessCode) ? businessCode : null,
+            logid, retry_after: String(response.headers?.['retry-after'] || '').slice(0, 64),
+            content_type: String(response.headers?.['content-type'] || '').slice(0, 128),
+            ...(diagnostics && target.pathname.includes('/player/')
+                ? { has_requested_video: Boolean(parsed?.data?.[diagnostics.vid] || parsed?.data?.video_model) } : {}), ...state,
+        });
         if ([301, 302, 303, 307, 308].includes(response.status)) {
             // Do not resend a signed body to a redirect destination.
             if (options.method === 'POST' || !response.headers.location) throw Object.assign(new Error('App 接口发生不支持的跳转'), { code: 'SECURITY_BLOCKED' });
@@ -361,15 +396,13 @@ async function requestJson(url, options, deadline, signal) {
             continue;
         }
         if (response.status !== 200) throw Object.assign(new Error(`App 片源请求失败（HTTP ${response.status}）`), { status: response.status });
-        const raw = typeof response.data === 'string' ? response.data : '';
-        if (!raw.trim()) {
+        if (typeof response.data === 'string' && !raw.trim()) {
             throw Object.assign(new Error('App 接口返回空响应，可能是签名或设备鉴权问题'), {
                 code: 'EMPTY_RESPONSE',
                 status: response.status,
-                logid: response.headers?.['x-tt-logid'] || '',
+                logid, requestId,
             });
         }
-        const parsed = typeof response.data === 'string' ? jsonBody(raw) : response.data;
         if (!parsed || typeof parsed !== 'object') throw Object.assign(new Error('App 接口未返回有效数据'), { code: 'INVALID_RESPONSE' });
         if (response.headers) {
             Object.defineProperty(parsed, '_headers', {
@@ -510,7 +543,9 @@ async function fetchAppPlayUrl(vid, options = {}) {
         biz_param: { detail_page_version: 0, device_level: 3, disable_digg_stat: false, need_all_video_definition: true, need_mp4_align: false, use_os_player: false, use_server_dns: false, video_platform: 1024 },
         mixed_video_id_map: { '1004': batch },
     });
-    const execRequestJson = (...args) => (module.exports.requestJson || requestJson)(...args);
+    const playbackId = crypto.randomUUID();
+    const execRequestJson = (url, requestOptions, ...args) => (module.exports.requestJson || requestJson)(url,
+        { ...requestOptions, diagnostics: { playback_id: playbackId, vid } }, ...args);
     const device = await getPlaybackDevice(execRequestJson, signal);
     let signed = playbackRequest(payload, device, VIDEO_API);
     let response;

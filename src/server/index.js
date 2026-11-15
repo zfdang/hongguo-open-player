@@ -109,7 +109,8 @@ app.get('/api/device', async (_req, res) => {
       success: true,
       device_id: device.device_id,
       iid: device.iid,
-      created_at: device.created_at
+      created_at: device.created_at,
+      session: getPlaybackDevice.diagnostics(device, require('./native/device-session').PLAYBACK_URL)
     });
   } catch (err) {
     sendApiError(res, err);

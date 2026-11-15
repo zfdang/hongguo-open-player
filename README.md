@@ -85,6 +85,14 @@ xattr -dr com.apple.quarantine "/Applications/红果开源播放器.app"
 
 移除隔离标记会绕过此应用的部分安全检查，请只对确认可信的文件使用。如果系统明确提示包含恶意软件，或重新下载后仍怀疑文件损坏、被篡改，请勿运行该命令。更多说明请参阅 [Apple 的安全打开应用指南](https://support.apple.com/zh-cn/102445)。
 
+## 播放取址诊断
+
+运行日志中的 `[AppRequest]` 记录每次 App 接口响应：接口域名和路径、HTTP 状态、耗时、正文长度、业务码和 `logid`。同一次播放的主接口与备用接口通过 `playback_id` 关联；`request_id` 标识单次请求，`device_key` 是设备身份的摘要。空正文仅标记为 `EMPTY_RESPONSE`，不能单凭此项认定设备被封禁。
+
+设备会话信息包括最近使用、成功和失败时间、请求计数、连续失败次数、请求前闲置时长，以及匹配当前接口的 Cookie 名称、数量和最近有效期。日志不记录 Cookie 值、签名或响应正文；`GET /api/device` 的 `session` 字段提供当前会话摘要，仍需播放器本地会话认证。
+
+响应中的 `Set-Cookie` 会按域名、路径及有效期更新，即使响应为空或 HTTP 状态为错误也会处理。Cookie 变化立即保存到设备文件，常规使用统计最多每 30 秒保存一次；重启会加载有效期信息。旧设备请求的响应不会更新新设备。旧版设备文件只迁移 `install_id`、`store-region`、`store-region-src` 三个协议身份 Cookie，其余旧 Cookie 因缺少作用域信息不迁移；保留现有排除 `ttreq` 的行为。此维护不会自动注册或轮换设备。
+
 ## 🏗️ 架构设计与文档
 
 当前实现采用 **Electron 桌面窗口 + Node.js / Express 本地服务 + Vue 界面**，观看历史、收藏和最近搜索以本地 JSON 文件保存。早期方案中的 SwiftUI、AVPlayer 和 SQLite 选型不代表当前实现。
