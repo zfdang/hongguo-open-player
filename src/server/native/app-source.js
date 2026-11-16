@@ -562,7 +562,6 @@ function sleepWithSignal(ms, signal) {
             signal?.removeEventListener('abort', onAbort);
             resolve();
         }, ms);
-        timer.unref?.();
         signal?.addEventListener('abort', onAbort, { once: true });
     });
 }

@@ -100,6 +100,9 @@ async function runTests() {
           }
         } catch (err) {
           lastErr = err;
+          if (err.response?.status === 500) {
+            await client.post(`${BASE_URL}/api/device/reset`).catch(() => {});
+          }
           await new Promise(r => setTimeout(r, 1000));
         }
       }
