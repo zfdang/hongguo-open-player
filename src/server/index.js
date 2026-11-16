@@ -79,6 +79,7 @@ app.use(express.static(clientDir));
 function sendApiError(res, error) {
   const status = error.status >= 400 && error.status < 600 ? error.status : 500;
   const messages = {
+    EMPTY_RESPONSE: '上游接口返回空响应，请尝试点击右上角菜单中的“生成新的设备ID”后重试',
     DEVICE_REGISTRATION_FAILED: '播放设备注册暂时失败，请稍后重试',
     ETIMEDOUT: '上游请求超时，请稍后重试',
     SECURITY_BLOCKED: '视频源地址未通过安全检查',
@@ -227,7 +228,9 @@ app.post('/api/prefetch/:vid', (req, res) => {
       if (/^\d{1,30}$/.test(clean) && !nextVids.includes(clean)) nextVids.push(clean);
     }
   }
-  streamService.prefetch(vid, 'auto', true, 45000, nextVids);
+  const allowHevc = req.query?.hevc !== '0';
+  if (allowHevc) streamService.prefetch(vid, 'auto', true, 45000, nextVids);
+  else streamService.prefetch(vid, 'auto', true, 45000, nextVids, false);
   res.sendStatus(202);
 });
 

@@ -2,8 +2,28 @@
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { assertUnencryptedMp4 } = require('./hongguo');
+
+let cachedHevcDecoderBinary;
+let cachedHevcDecoderSupport = false;
+
+function supportsHevcDecoder() {
+  const bin = binaryPath();
+  if (cachedHevcDecoderBinary === bin) return cachedHevcDecoderSupport;
+  cachedHevcDecoderBinary = bin;
+  try {
+    const res = spawnSync(bin, ['-hide_banner', '-decoders'], {
+      encoding: 'utf8',
+      timeout: 3000,
+      windowsHide: true,
+    });
+    cachedHevcDecoderSupport = res.status === 0 && /\bhevc\b/.test(res.stdout || '');
+  } catch (_) {
+    cachedHevcDecoderSupport = false;
+  }
+  return cachedHevcDecoderSupport;
+}
 
 function binaryPath() {
   if (process.env.HONGGUO_BVC2_FFMPEG) return process.env.HONGGUO_BVC2_FFMPEG;
@@ -114,4 +134,4 @@ async function* streamBytevc2(buffer, key, signal) {
     await fs.rm(dir, { recursive: true, force: true });
   }
 }
-module.exports = { binaryPath, transcodeBytevc2, streamBytevc2 };
+module.exports = { binaryPath, supportsHevcDecoder, transcodeBytevc2, streamBytevc2 };

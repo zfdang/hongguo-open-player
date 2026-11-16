@@ -438,3 +438,58 @@ test('prefetch forwards nextVids to getStreamingPlan and handleStream passes fol
     global.setTimeout = originalSetTimeout;
   }
 });
+
+test('hevc=0 isolates stream plan cache and triggers progressive transcode when fallback returns HEVC', async () => {
+  const http = require('node:http');
+  const appSource = require('../../src/server/native/app-source');
+  const originalFetch = appSource.fetchAppPlayUrl;
+  const service = new StreamService({
+    progressiveTranscode: async function* () {
+      yield Buffer.from('ftypmp42moofmdat');
+    }
+  });
+  service.downloadFastestMedia = async () => ({
+    buffer: Buffer.from('000000186674797069736f6d', 'hex'),
+    variant: { codec: 'hevc', contentKey: null }
+  });
+
+  const calls = [];
+  appSource.fetchAppPlayUrl = async (vid, options) => {
+    calls.push({ vid, allowHevc: options.allowHevc, allowHevcTranscode: options.allowHevcTranscode });
+    return { codec: 'hevc', duration: 60, url: 'https://example.com/hevc.mp4', contentKey: null };
+  };
+
+  try {
+    // Seed a direct HEVC streaming plan under hevc=1
+    service.plans.set('777:auto', {
+      plan: { size: 5, bytes: 5, read: async function* () { yield Buffer.from('12345'); } },
+      expires: Date.now() + 60000
+    });
+
+    const server = http.createServer((req, res) => {
+      const parsed = new URL(req.url, 'http://127.0.0.1');
+      req.query = Object.fromEntries(parsed.searchParams);
+      service.handleStream(req, res, parsed.pathname.split('/').pop());
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${server.address().port}/api/stream/777`;
+
+    try {
+      const probeRes = await fetch(`${base}?mse=1&hevc=0`);
+      assert.equal(probeRes.status, 409);
+      const body = await probeRes.json();
+      assert.equal(body.code, 'BYTEVC2_PROGRESSIVE');
+      assert.equal(calls.length, 1);
+      assert.deepEqual(calls[0], { vid: '777', allowHevc: false, allowHevcTranscode: true });
+
+      const streamRes = await fetch(`${base}?mse=stream&hevc=0`);
+      assert.equal(streamRes.status, 200);
+      assert.equal(Buffer.from(await streamRes.arrayBuffer()).toString(), 'ftypmp42moofmdat');
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+      service.shutdown();
+    }
+  } finally {
+    appSource.fetchAppPlayUrl = originalFetch;
+  }
+});

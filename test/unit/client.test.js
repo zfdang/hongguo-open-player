@@ -968,6 +968,19 @@ test('onVideoError displays an unsupported ByteVC2 message', async () => {
   assert.equal(state.videoErrorMessage.value, '本集使用 ByteVC2 编码，当前播放器暂不支持');
 });
 
+test('onVideoError guides user to regenerate device ID when upstream returns EMPTY_RESPONSE', async () => {
+  const state = client(async url => url.startsWith('/api/stream/')
+    ? { ok: false, status: 500, json: async () => ({ code: 'EMPTY_RESPONSE', error: 'App 接口返回空响应，可能是签名或设备鉴权问题' }) }
+    : response({}));
+  state.activeSeries.value = { series_id: '1', series_title: '测试短剧' };
+  state.activeEpisodes.value = [{ vid: '123', vid_index: 1 }];
+  state.activeEpisodeIndex.value = 1;
+  state.videoEl.value = { error: { code: 4, message: 'Format error' } };
+  await state.onVideoError();
+  assert.match(state.videoErrorMessage.value, /返回空响应/);
+  assert.match(state.videoErrorMessage.value, /生成新的设备ID/);
+});
+
 test('ByteVC2 progressive playback starts on detection and stops on switching episodes', async () => {
   let started, stopped = 0;
   const state = client(async url => url.startsWith('/api/stream/')
@@ -1605,4 +1618,62 @@ test('video resolution badge reflects loaded metadata dimensions and keyboard-hi
   state.closeTheater();
   assert.equal(state.videoResolution.value.width, 0);
   assert.equal(state.resolutionText.value, '');
+});
+
+test('client detects unsupported HEVC pre-flight and appends hevc=0 to stream and prefetch URLs', async () => {
+  const requests = [];
+  const state = client(async url => {
+    requests.push(url);
+    return response({});
+  }, {
+    document: {
+      documentElement: { classList: { add() {} } },
+      createElement: tag => tag === 'video' ? { canPlayType: () => '' } : {}
+    }
+  });
+  assert.equal(state.hevcSupported.value, false);
+  state.activeEpisodes.value = [
+    { vid: '101', vid_index: 1 },
+    { vid: '102', vid_index: 2 },
+    { vid: '103', vid_index: 3 }
+  ];
+  state.activeEpisodeIndex.value = 1;
+  assert.match(state.currentStreamUrl.value, /[?&]hevc=0(?:&|$)/);
+
+  state.isPlaying.value = true;
+  state.duration.value = 60;
+  state.videoEl.value = { currentTime: 40, playbackRate: 1, buffered: { length: 0 } };
+  state.onTimeUpdate();
+  assert.ok(requests.some(u => u.includes('/api/prefetch/102') && u.includes('hevc=0')));
+});
+
+test('client falls back to hevc=0 when runtime onCanPlay reports 0x0 video dimensions', () => {
+  const state = client(async () => response({}), {
+    document: {
+      documentElement: { classList: { add() {} } },
+      createElement: tag => tag === 'video' ? { canPlayType: () => 'probably' } : {}
+    }
+  });
+  assert.equal(state.hevcSupported.value, true);
+  state.activeEpisodes.value = [{ vid: '7705413806972734488', vid_index: 3 }];
+  state.activeEpisodeIndex.value = 3;
+  assert.doesNotMatch(state.currentStreamUrl.value, /hevc=0/);
+
+  let playCalls = 0;
+  state.videoEl.value = {
+    videoWidth: 0,
+    videoHeight: 0,
+    duration: 82.45,
+    currentTime: 1.5,
+    play: async () => { playCalls++; },
+    pause() {}
+  };
+  state.onCanPlay();
+  assert.equal(state.hevcSupported.value, false);
+  assert.match(state.currentStreamUrl.value, /hevc=0/);
+  assert.equal(playCalls, 1);
+
+  // Calling onCanPlay again with 0x0 after fallback must not loop or re-trigger play
+  state.onCanPlay();
+  assert.equal(playCalls, 1);
 });

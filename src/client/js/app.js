@@ -612,6 +612,39 @@ const app = createApp({
     let bytevc2Fallback = null;
     let bytevc2FallbackActive = false;
 
+    function probeHevcSupportSync() {
+      try {
+        const probe = document?.createElement?.('video');
+        if (!probe || typeof probe.canPlayType !== 'function') return true;
+        return Boolean(
+          probe.canPlayType('video/mp4; codecs="hvc1.1.6.L120.90"') ||
+          probe.canPlayType('video/mp4; codecs="hev1.1.6.L120.90"')
+        );
+      } catch (_) {
+        return true;
+      }
+    }
+
+    const hevcSupported = ref(probeHevcSupportSync());
+    let runtimeHevcFallbackTriggered = false;
+
+    if (hevcSupported.value && typeof navigator !== 'undefined' && typeof navigator.mediaCapabilities?.decodingInfo === 'function') {
+      navigator.mediaCapabilities.decodingInfo({
+        type: 'file',
+        video: {
+          contentType: 'video/mp4; codecs="hvc1.1.6.L120.90"',
+          width: 1080,
+          height: 1920,
+          bitrate: 400000,
+          framerate: 30
+        }
+      }).then(info => {
+        if (info && info.supported === false) {
+          hevcSupported.value = false;
+        }
+      }).catch(() => {});
+    }
+
     // 当前播放直链 (通过本地边下边解代理)
     const currentStreamUrl = computed(() => {
       const ep = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value);
@@ -623,6 +656,7 @@ const app = createApp({
       const nextList = [nextEp1?.vid, nextEp2?.vid, nextEp3?.vid].filter(Boolean);
       const params = [];
       if (window.Bytevc2Stream?.supported()) params.push('mse=1');
+      if (!hevcSupported.value) params.push('hevc=0');
       if (nextEp1?.vid) params.push(`next_vid=${encodeURIComponent(nextEp1.vid)}`);
       if (nextList.length > 1) params.push(`next_vids=${encodeURIComponent(nextList.join(','))}`);
       if (streamRefreshTick.value > 0) params.push(`refresh=${streamRefreshTick.value}`);
@@ -1365,6 +1399,7 @@ const app = createApp({
       bytevc2Session = null;
       bytevc2Fallback = null;
       bytevc2FallbackActive = false;
+      runtimeHevcFallbackTriggered = false;
       lastNearEndPrefetch = 0;
       stopDanmakuAnimation();
       danmakuKey = '';
@@ -1633,8 +1668,27 @@ const app = createApp({
       resetControlsTimer();
     }
 
+    function checkVideoDimensionsFallback(video) {
+      if (!video || !hevcSupported.value || runtimeHevcFallbackTriggered) return false;
+      if (bytevc2Session || bytevc2FallbackActive) return false;
+      if (typeof video.videoWidth !== 'number' || typeof video.videoHeight !== 'number') return false;
+      if ((video.videoWidth > 0 && video.videoHeight > 0) || !(Number(video.duration) > 0)) return false;
+      runtimeHevcFallbackTriggered = true;
+      if (Number(video.currentTime) > 0) pendingResumeSec = Number(video.currentTime);
+      isBuffering.value = true;
+      reportClientLog('WARN', '检测到视频画面尺寸为 0x0，当前环境可能不支持 HEVC 解码，自动切换至兼容片源或转码播放');
+      hevcSupported.value = false;
+      if (typeof nextTick === 'function') {
+        nextTick(() => {
+          videoEl.value?.play?.().catch(() => {});
+        });
+      }
+      return true;
+    }
+
     function onCanPlay(event) {
       if (event && event.target !== videoEl.value) return;
+      if (checkVideoDimensionsFallback(videoEl.value)) return;
       isBuffering.value = false;
       if (videoEl.value?.videoWidth && videoEl.value?.videoHeight) {
         videoResolution.value = {
@@ -1699,7 +1753,10 @@ const app = createApp({
             const next3 = activeEpisodes.value.find(ep => ep.vid_index === activeEpisodeIndex.value + 3);
             const next4 = activeEpisodes.value.find(ep => ep.vid_index === activeEpisodeIndex.value + 4);
             const followVids = [next2?.vid, next3?.vid, next4?.vid].filter(Boolean);
-            const query = followVids.length ? `?next_vids=${encodeURIComponent(followVids.join(','))}` : '';
+            const queryParams = [];
+            if (followVids.length) queryParams.push(`next_vids=${encodeURIComponent(followVids.join(','))}`);
+            if (!hevcSupported.value) queryParams.push('hevc=0');
+            const query = queryParams.length ? `?${queryParams.join('&')}` : '';
             fetch(`/api/prefetch/${encodeURIComponent(next.vid)}${query}`, { method: 'POST' }).catch(() => {});
           }
         }
@@ -1768,6 +1825,8 @@ const app = createApp({
                   bytevc2Session = window.Bytevc2Stream.start(video, progressiveUrl, Number(errData.duration), bytevc2Fallback);
                 } catch (_) { bytevc2Fallback(); return; }
                 video.play().catch(() => {});
+              } else if (errData?.code === 'EMPTY_RESPONSE' || /返回空响应/.test(errData?.error || '')) {
+                videoErrorMessage.value = '上游接口返回空响应，可能是当前设备鉴权受限；请点击右上角菜单中的“生成新的设备ID”后重试';
               } else if (errData?.code === 'DEVICE_REGISTRATION_FAILED' || /匿名播放设备注册失败|ERR_NETWORK/i.test(errData?.error || '')) {
                 videoErrorMessage.value = '播放设备注册受阻（ERR_NETWORK）；请检查网络连接、代理软件（Clash/去广告规则）或 DNS 设置';
                 reportClientLog('WARN', '播放器源探测提示: 设备注册受阻（ERR_NETWORK），已展示网络/代理排查指引');
@@ -1775,6 +1834,8 @@ const app = createApp({
                 videoErrorMessage.value = '视频源地址未通过安全检查；请切换分集重试';
               } else if (errData?.code === 'UNSUPPORTED_BYTEVC2') {
                 videoErrorMessage.value = '本集使用 ByteVC2 编码，当前播放器暂不支持';
+              } else if (errData?.code === 'UNSUPPORTED_HEVC') {
+                videoErrorMessage.value = errData.error || '当前设备不支持 HEVC (H.265) 硬件解码，且本集暂无兼容片源';
               } else if (errData?.code === 'BYTEVC2_TRANSCODER_UNAVAILABLE' || errData?.code === 'BYTEVC2_TRANSCODE_FAILED') {
                 videoErrorMessage.value = errData.error || 'ByteVC2 视频转换失败，请重试';
               } else if (errData?.error) {
@@ -2066,7 +2127,7 @@ const app = createApp({
       playbackRate, showSpeedMenu, selectSpeed,
       volume,
       isMuted,
-      videoResolution, resolutionText, resolutionTitle,
+      videoResolution, resolutionText, resolutionTitle, hevcSupported,
       currentGroup,
       currentStreamUrl,
       episodeGroups,
