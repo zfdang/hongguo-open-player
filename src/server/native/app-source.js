@@ -12,6 +12,7 @@ const { getPlaybackDevice } = require('./playback-device');
 const { deviceKey } = require('./device-session');
 const sm3 = require('./sm3');
 const { PlayerSigner } = require('./argus');
+const { signPlaybackV5 } = require('./v5-sign');
 const { normalizeDownloadQuality, meetsDownloadQuality } = require('./download-quality');
 const localId = () => String(1000000000000000n + BigInt('0x' + crypto.randomBytes(6).toString('hex')));
 const PROCESS_NONCE = crypto.randomBytes(18).toString('base64url');
@@ -34,6 +35,13 @@ const SHORTPLAY_APIS = [
 const SEARCH_API = 'https://api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/search/tab/v';
 const VIDEO_UA = 'com.phoenix.read/71332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
 const PLAYBACK_UA = 'com.phoenix.read/74332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
+// v5 playback uses the official 7.3.9.32 PGT-AN10 profile (see hongguoTV MobilePlayback.kt).
+const V5_PLAYBACK_UA = 'com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)';
+const V5_PLAYBACK_QUERY = {
+    aid: '8662', app_name: 'novelread', version_code: '74332', version_name: '7.4.3.32',
+    channel: 'vivo_8662_64', device_platform: 'android', device_type: 'PGT-AN10',
+    os_version: '12', update_version_code: '74332',
+};
 const SEARCH_UA = 'com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)';
 const DEVICE = {
     ac: 'wifi', channel: 'update_64', aid: '8662', app_name: 'novelread',
@@ -43,8 +51,6 @@ const DEVICE = {
     update_version_code: '71332', host_abi: 'arm64-v8a', dragon_device_type: 'phone', pv_player: '71332',
     compliance_status: '0', need_personal_recommend: '1', player_so_load: '1', is_android_pad_screen: '0',
 };
-const PLAYBACK_DEVICE = { ...DEVICE, version_code: '74332', version_name: '7.4.3.32',
-    manifest_version_code: '74332', update_version_code: '74332', pv_player: '74332' };
 function str(value, fallback = '') { return String(value == null ? fallback : value).trim(); }
 function cleanUrl(value) { return str(value).replace(/\\\//g, '/').replace(/\\u0026/g, '&').replace(/&amp;/g, '&'); }
 function jsonBody(value) { try { return JSON.parse(value); } catch { return null; } }
@@ -149,20 +155,21 @@ function helios(khronos) {
 
 function branchOf(url, body, khronos) { const bodyMd5 = body ? crypto.createHash('md5').update(body).digest() : Buffer.alloc(16); const q = sm3(url.split('?')[1]); const iv = getIv(getIv(getIv(0x20230928, q), bodyMd5), le32(khronos)); const low = iv & 15; return low - (((low * 171) >> 9) * 3); }
 function playbackRequest(payload, identity, apiBase = VIDEO_API) {
+    // v04.10.03 mobile playback signing. The v3 medusa is rejected with an empty
+    // HTTP 200 by the current player endpoint; v5 binds the registered device
+    // identity into both the query and the medusa plaintext. Search/catalogue
+    // endpoints still use the legacy v3 signer elsewhere in this module.
     const body = gzipSync(Buffer.from(payload));
-    const khronos = Math.floor(Date.now() / 1000);
-    const requestTicket = String(Date.now());
     const { device_id, iid, cdid } = identity || {};
-    const devParams = { ...PLAYBACK_DEVICE, device_id, iid, cdid };
-    const query = pythonUrlEncode({ ...devParams, _rticket: requestTicket });
-    const url = `${apiBase}?${query}`;
-    const signerHeaders = PlayerSigner.headers(query, body, khronos);
+    const values = {
+        ...V5_PLAYBACK_QUERY,
+        iid: iid || '', cdid: cdid || '', device_id: device_id || '',
+    };
+    const { url, headers: signedHeaders } = signPlaybackV5(apiBase, values, body);
     const headers = {
-        'User-Agent': PLAYBACK_UA, Accept: 'application/json; charset=utf-8,application/x-protobuf',
-        'Content-Type': 'application/json; charset=UTF-8', 'Content-Encoding': 'gzip',
-        'sdk-version': '2', 'passport-sdk-version': '5051452', 'x-xs-from-web': '0',
-        'x-ss-dp': '8662',
-        ...signerHeaders,
+        'User-Agent': V5_PLAYBACK_UA, Accept: 'application/json',
+        'Content-Encoding': 'gzip',
+        ...signedHeaders,
     };
     // The transport supplies cookies scoped to the destination from the active session.
     return { url, body, headers };
@@ -712,9 +719,9 @@ async function resolveUpstreamEntry(vid, batch, refresh, callerSignal) {
     const job = { controller, waiters: new Set(), promise: null };
     job.promise = (async () => {
         const payload = JSON.stringify({
-            dr_scene: 'player',
-            biz_param: { detail_page_version: 0, device_level: 3, disable_digg_stat: false, need_all_video_definition: true, need_mp4_align: false, use_os_player: false, use_server_dns: false, video_platform: 1024 },
+            biz_param: { detail_page_version: 0, device_level: 1, disable_digg_stat: false, disable_video_relate_book: false, need_all_video_definition: true, need_mp4_align: false, use_os_player: false, use_server_dns: false, video_platform: 1024 },
             mixed_video_id_map: { '1004': batch },
+            dr_scene: 'player',
         });
         const playbackId = crypto.randomUUID();
         const execRequestJson = (url, requestOptions, ...args) => (module.exports.requestJson || requestJson)(url,
