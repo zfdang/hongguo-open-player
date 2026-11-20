@@ -211,40 +211,6 @@ class StoreService {
     this.reloadDiskStateIfNeeded();
     return Object.hasOwn(this.state.history, String(seriesId)) ? this.state.history[String(seriesId)] : null;
   }
-
-  /**
-   * 切换收藏状态
-   */
-  toggleFavorite(series) {
-    this.validateSeries(series);
-    const sid = String(series.series_id);
-    return this.mutate(state => {
-      const favorites = { ...state.favorites };
-      const exists = Object.hasOwn(favorites, sid);
-      if (exists) delete favorites[sid];
-      else favorites[sid] = {
-        series_id: sid, series_title: series.series_title || '', cover: series.cover || '',
-        episode_count: series.episode_count || series.total || 0, updated_at: Date.now()
-      };
-      return { state: { ...state, favorites }, result: !exists };
-    });
-  }
-
-  /**
-   * 获取所有收藏
-   */
-  getFavorites() {
-    this.reloadDiskStateIfNeeded();
-    return Object.values(this.state.favorites).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
-  }
-
-  /**
-   * 判断单剧是否已收藏
-   */
-  isFavorite(seriesId) {
-    this.reloadDiskStateIfNeeded();
-    return Object.hasOwn(this.state.favorites, String(seriesId));
-  }
 }
 
 module.exports = new StoreService();

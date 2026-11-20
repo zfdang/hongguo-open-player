@@ -94,13 +94,16 @@ test('fetchAppPlayUrl batches nextVids and caches returned models in entryCache'
       return { code: 0, device_id_str: '999', install_id_str: '888' };
     }
     assert.equal(options.headers['Content-Encoding'], 'gzip');
-    assert.ok(options.headers['x-argus']);
-    assert.ok(options.headers['x-ladon']);
+    // v04.10.03 mobile playback signing: only khronos/helios/medusa are sent.
+    assert.ok(options.headers['x-khronos']);
+    assert.ok(options.headers['x-helios']);
+    assert.ok(options.headers['x-medusa']);
     assert.equal(options.headers['x-ss-stub'], createHash('md5').update(options.data).digest('hex').toUpperCase());
-    assert.ok(options.headers['x-ss-req-ticket']);
     assert.equal(new URL(url).searchParams.get('aid'), '8662');
     assert.equal(new URL(url).searchParams.get('version_name'), '7.4.3.32');
-    assert.ok(options.headers['User-Agent'].includes('74332'));
+    assert.equal(new URL(url).searchParams.get('device_type'), 'PGT-AN10');
+    assert.equal(new URL(url).searchParams.has('ts'), false);
+    assert.ok(options.headers['User-Agent'].includes('PGT-AN10'));
     requests.push({ url, body: JSON.parse(gunzipSync(options.data)) });
     return {
       code: 0,
@@ -448,7 +451,7 @@ test('fetchAppPlayUrl retries once after brief sync delay when a freshly registe
       return { code: 0, device_id_str: '999001', install_id_str: '888001' };
     }
     playCalls++;
-    // First 8 calls cover 5 multi_video_model + 3 shortplay; succeed on the 9th call (post-sync retry)
+    // First 8 calls cover 5 multi_video_model + 3 shortplay; the 9th is the video_tab GET fallback
     if (playCalls <= 8) {
       throw Object.assign(new Error('App upstream returned empty response'), { code: 'EMPTY_RESPONSE' });
     }
@@ -459,6 +462,61 @@ test('fetchAppPlayUrl retries once after brief sync delay when a freshly registe
     const play = await appSource.fetchAppPlayUrl('40007');
     assert.equal(play.url, 'https://qznovelvod.com/video_40007.mp4');
     assert.equal(playCalls, 9);
+  } finally {
+    appSource.requestJson = originalRequest;
+    appSource.clearEntryCache();
+    getPlaybackDevice.reset();
+  }
+});
+
+test('video_tab GET fallback signs with same v5 signer and normalizes the response', async () => {
+  const { getPlaybackDevice } = require('../../src/server/native/playback-device');
+  const originalRequest = appSource.requestJson;
+  appSource.clearEntryCache();
+  let tabUrl = '';
+  appSource.requestJson = async (url, options) => {
+    if (url.includes('register')) return { code: 0, device_id_str: '993001', install_id_str: '888003' };
+    if (url.includes('/reading/bookapi/video_tab/')) {
+      tabUrl = url;
+      assert.equal(options.method, 'GET');
+      assert.ok(url.includes('version_code=73932'), 'tab query overrides carrier to 7.3.9.32');
+      assert.ok(url.includes('video_id=40009'));
+      assert.ok(url.includes('need_all_video_definition=1'));
+      assert.ok(!options.headers['Content-Encoding'], 'GET fallback carries no gzip body header');
+      assert.ok(options.headers['x-khronos'] && options.headers['x-medusa'], 'GET fallback still carries v5 signature');
+      return { code: 0, data: { video_model_data: { 40009: { video_model: mockEntry('40009').video_model } } } };
+    }
+    throw Object.assign(new Error('App 接口返回空响应，可能是签名或设备鉴权问题'), { code: 'EMPTY_RESPONSE' });
+  };
+  try {
+    const result = await appSource.fetchAppPlayUrl('40009');
+    assert.ok(result.variants.length >= 1, 'video_tab fallback returns playable model');
+    assert.ok(tabUrl.includes('/reading/bookapi/video_tab/multi_video_model/v1/'));
+  } finally {
+    appSource.requestJson = originalRequest;
+    appSource.clearEntryCache();
+    getPlaybackDevice.reset();
+  }
+});
+
+test('all-empty playback marks cooldown; next fetch fast-fails without hitting upstream', async () => {
+  const { getPlaybackDevice } = require('../../src/server/native/playback-device');
+  const originalRequest = appSource.requestJson;
+  appSource.clearEntryCache();
+  let upstreamCalls = 0;
+  appSource.requestJson = async (url) => {
+    if (url.includes('register')) return { code: 0, device_id_str: '994001', install_id_str: '888004' };
+    upstreamCalls++;
+    throw Object.assign(new Error('App 接口返回空响应，可能是签名或设备鉴权问题'), { code: 'EMPTY_RESPONSE' });
+  };
+  try {
+    // 第一次：全链（multi+shortplay+tab，含新设备同步重试段）空响应 → 标记冷却
+    // 并直接以 RATE_LIMIT_COOLDOWN 返回，客户端据此不再触发自动换设备
+    await assert.rejects(appSource.fetchAppPlayUrl('40010'), { code: 'RATE_LIMIT_COOLDOWN' });
+    const afterFirst = upstreamCalls;
+    // 第二次：冷却期内直接快速失败，不再打上游
+    await assert.rejects(appSource.fetchAppPlayUrl('40010', { refresh: true }), { code: 'RATE_LIMIT_COOLDOWN' });
+    assert.equal(upstreamCalls, afterFirst, 'cooldown fast-fail must not hit upstream');
   } finally {
     appSource.requestJson = originalRequest;
     appSource.clearEntryCache();

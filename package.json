@@ -1,7 +1,7 @@
 {
-  "name": "hongguo-open-player",
+  "name": "hongguo-player-plus",
   "version": "1.0.0",
-  "description": "红果开源播放器原生桌面版 (支持 macOS / Windows 跨平台原生应用 / 实时流式解密 / 沉浸式竖屏观影)",
+  "description": "红果播放器 Plus：基于 hongguo-open-player 的增强版（扫码登录红果账号 / 账号播放·预约·点赞记录 / 发送弹幕 / 预约下一季）",
   "main": "src/electron/main.js",
   "scripts": {
     "start": "node src/server/index.js",
@@ -18,8 +18,8 @@
     "test:arm64": "node test/verify-mac-arm64-ep5plus.js"
   },
   "build": {
-    "appId": "com.zfdang.hongguo.openplayer",
-    "productName": "红果开源播放器",
+    "appId": "com.hongguo.playerplus",
+    "productName": "红果播放器 Plus",
     "copyright": "Copyright © 2026",
     "publish": null,
     "electronDownload": {
@@ -30,7 +30,12 @@
     },
     "artifactName": "${name}-${version}-${os}-${arch}.${ext}",
     "mac": {
-      "extraResources": [{ "from": "build/bytevc2/${arch}", "to": "bytevc2" }],
+      "extraResources": [
+        {
+          "from": "build/bytevc2/${arch}",
+          "to": "bytevc2"
+        }
+      ],
       "category": "public.app-category.video",
       "icon": "build/icon.icns",
       "artifactName": "${name}-${version}-mac-${arch}.${ext}",
@@ -55,7 +60,7 @@
       "gatekeeperAssess": false
     },
     "dmg": {
-      "title": "安装 红果开源播放器",
+      "title": "安装 红果播放器 Plus",
       "contents": [
         {
           "x": 130,
@@ -74,7 +79,12 @@
       }
     },
     "win": {
-      "extraResources": [{ "from": "build/bytevc2/${arch}", "to": "bytevc2" }],
+      "extraResources": [
+        {
+          "from": "build/bytevc2/${arch}",
+          "to": "bytevc2"
+        }
+      ],
       "target": [
         {
           "target": "nsis",
@@ -103,7 +113,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "红果开源播放器",
+      "shortcutName": "红果播放器 Plus",
       "artifactName": "${name}-${version}-win-${arch}-setup.${ext}"
     },
     "portable": {
@@ -137,6 +147,7 @@
   },
   "devDependencies": {
     "electron": "^45.1.0",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "js-yaml": "^5.5.0"
   }
 }

@@ -11,11 +11,9 @@ test('store persists atomically, rejects invalid progress, and propagates write 
   const store = new Store(dir);
   const item = { series_id: '123', position_sec: 12, episode_index: 2 };
   await store.updateProgress(item);
-  await store.toggleFavorite(item);
   const reloaded = new Store(dir);
   assert.equal(reloaded.getSeriesProgress('123').position_sec, 12);
-  assert.equal(reloaded.isFavorite('123'), true);
-  assert.equal(reloaded.isFavorite('toString'), false);
+  assert.equal(reloaded.getSeriesProgress('456'), null);
   for (const bad of [{ series_id: '__proto__' }, { ...item, position_sec: -1 }, { ...item, duration_sec: Infinity }]) {
     assert.throws(() => store.updateProgress(bad));
   }
@@ -49,7 +47,7 @@ test('store serializes writes, retries Windows locks and recovers a corrupt prim
   assert.equal(new Store(dir).getHistory().length, 2);
 });
 
-test('multiple store instances sharing dataDir do not overwrite each other history or favorites', async t => {
+test('multiple store instances sharing dataDir do not overwrite each other history entries', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'player-multi-store-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -60,14 +58,13 @@ test('multiple store instances sharing dataDir do not overwrite each other histo
   // Store A writes progress for series 100
   await storeA.updateProgress({ series_id: '100', series_title: '剧目A', position_sec: 14 });
 
-  // Store B toggles favorite for series 200
-  await storeB.toggleFavorite({ series_id: '200', series_title: '剧目B' });
+  // Store B writes progress for series 200
+  await storeB.updateProgress({ series_id: '200', series_title: '剧目B', position_sec: 20 });
 
   // Verify that storeB did not overwrite storeA's history
   const storeC = new Store(dir);
   assert.equal(storeC.getSeriesProgress('100')?.position_sec, 14);
-  assert.equal(storeC.isFavorite('200'), true);
-  assert.equal(storeA.isFavorite('200'), true);
+  assert.equal(storeC.getSeriesProgress('200')?.position_sec, 20);
   assert.equal(storeB.getSeriesProgress('100')?.position_sec, 14);
 });
 

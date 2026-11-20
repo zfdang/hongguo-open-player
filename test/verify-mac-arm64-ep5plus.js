@@ -6,7 +6,7 @@ const http = require('http');
 const os = require('os');
 const assert = require('assert');
 
-const DEFAULT_APP_PATH = path.join(__dirname, '../dist-electron/mac-arm64/红果开源播放器.app/Contents/MacOS/红果开源播放器');
+const DEFAULT_APP_PATH = path.join(__dirname, '../dist-electron/mac-arm64/红果播放器 Plus.app/Contents/MacOS/红果播放器 Plus');
 const APP_PATH = process.env.HONGGUO_APP_PATH || DEFAULT_APP_PATH;
 const USER_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-arm64-test-'));
 const SCREENSHOT_DIR = process.env.HONGGUO_SCREENSHOT_DIR || path.join(
@@ -132,7 +132,7 @@ class CDPClient {
 
 async function runArm64Verification() {
   console.log('================================================================');
-  console.log('🍎 红果开源播放器 macOS Apple Silicon (arm64) 原生发布端到端深度验证');
+  console.log('🍎 红果播放器 Plus macOS Apple Silicon (arm64) 原生发布端到端深度验证');
   console.log('================================================================\n');
 
   // 1. 验证目标二进制架构与文件存在性

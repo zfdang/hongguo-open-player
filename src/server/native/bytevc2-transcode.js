@@ -33,10 +33,19 @@ function binaryPath() {
     : path.resolve(__dirname, '../../../build/bytevc2', process.arch, executable);
 }
 
-async function transcodeBytevc2(buffer, key, signal) {
+// 转码输出上限随片源时长缩放（crf25 ultrafast 实测约 0.7MB/s，留 3 倍余量），
+// 最低 128MB、封顶 1GB，既容纳长集正常输出，也防异常片源失控转码撑爆磁盘
+function transcodeLimitBytes(durationSec) {
+  const base = 128 * 1024 * 1024;
+  if (!Number.isFinite(durationSec) || durationSec <= 0) return base;
+  return Math.min(1024 * 1024 * 1024, Math.max(base, Math.ceil(durationSec * 2.2 * 1024 * 1024)));
+}
+
+async function transcodeBytevc2(buffer, key, signal, durationSec) {
   signal?.throwIfAborted();
   if (!Buffer.isBuffer(key) || ![0, 16].includes(key.length)) throw new Error('ByteVC2 片源密钥无效');
   if (!key.length) assertUnencryptedMp4(buffer);
+  const limit = transcodeLimitBytes(durationSec);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hongguo-bvc2-'));
   const input = path.join(dir, 'input.mp4');
   const output = path.join(dir, 'output.mp4');
@@ -64,7 +73,7 @@ async function transcodeBytevc2(buffer, key, signal) {
       timer.unref?.();
       const sizeCheck = setInterval(() => {
         fs.stat(output).then(stat => {
-          if (stat.size >= 128 * 1024 * 1024 && !settled) {
+          if (stat.size >= limit && !settled) {
             stoppedReason = 'ByteVC2 视频转换结果过大';
             child.kill();
           }
@@ -83,16 +92,17 @@ async function transcodeBytevc2(buffer, key, signal) {
       if (signal?.aborted) abort();
     });
     const stat = await fs.stat(output);
-    if (!stat.size || stat.size >= 128 * 1024 * 1024) throw new Error('ByteVC2 视频转换结果过大或为空');
+    if (!stat.size || stat.size >= limit) throw new Error('ByteVC2 视频转换结果过大或为空');
     return await fs.readFile(output, { signal });
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
 }
-async function* streamBytevc2(buffer, key, signal) {
+async function* streamBytevc2(buffer, key, signal, durationSec) {
   signal?.throwIfAborted();
   if (!Buffer.isBuffer(key) || ![0, 16].includes(key.length)) throw new Error('ByteVC2 片源密钥无效');
   if (!key.length) assertUnencryptedMp4(buffer);
+  const limit = transcodeLimitBytes(durationSec);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hongguo-bvc2-stream-'));
   let child;
   let completion;
@@ -121,7 +131,7 @@ async function* streamBytevc2(buffer, key, signal) {
     for await (const chunk of child.stdout) {
       signal?.throwIfAborted();
       size += chunk.length;
-      if (size > 128 * 1024 * 1024) throw new Error('ByteVC2 视频转换结果过大');
+      if (size > limit) throw new Error('ByteVC2 视频转换结果过大');
       yield chunk;
     }
     const result = await completion;

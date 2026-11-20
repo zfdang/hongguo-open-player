@@ -2,8 +2,8 @@ const axios = require('axios');
 const { webMediaRequestOptions } = require('./web-media-guard');
 
 const SITE = 'https://hongguoduanju.com';
-const CATEGORIES = new Set(['real-drama', 'comic-drama', 'ai-drama', 'comic']);
-const RANKINGS = new Set(['hot-drama', 'hot-real-drama', 'hot-comic-drama', 'hot-ai-drama']);
+const CATEGORIES = new Set(['real-drama', 'comic-drama', 'comic']);
+const RANKINGS = new Set(['hot-drama', 'hot-real-drama', 'hot-comic-drama']);
 const TIMEOUT_MS = 10000;
 
 function publicMetadata(item) {

@@ -4,8 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
-  <title>红果开源播放器 - Hongguo Open Player</title>
+  <title>红果播放器 Plus - Hongguo Player Plus</title>
   <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/account-plus.css">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
 </head>
 <body class="dark-theme">
@@ -15,16 +16,20 @@
       <div class="header-left">
         <div class="brand" @click="goHome" title="返回首页">
           <img class="brand-icon" src="/assets/app-icon.png" alt="" width="28" height="28" aria-hidden="true">
-          <span class="brand-name"><span class="brand-accent">红果</span><span class="brand-suffix">开源播放器</span></span>
+          <span class="brand-name"><span class="brand-accent">红果</span><span class="brand-suffix">播放器 Plus</span></span>
         </div>
         <nav class="nav-tabs">
+          <button class="nav-item" :class="{ active: currentTab === 'recommend' }" @click="switchTab('recommend')">✨ 推荐</button>
           <button class="nav-item" :class="{ active: currentTab === 'hot-drama' && viewMode === 'catalog' }" @click="switchTab('hot-drama')">🔥 热门榜单</button>
-          <button class="nav-item" :class="{ active: currentTab === 'actors' && viewMode === 'catalog' }" @click="switchTab('actors')">🌟 剧星榜</button>
+          
           <button class="nav-item" :class="{ active: currentTab === 'real-drama' && viewMode === 'catalog' }" @click="switchTab('real-drama')">🎭 真人短剧</button>
           <button class="nav-item" :class="{ active: currentTab === 'comic-drama' && viewMode === 'catalog' }" @click="switchTab('comic-drama')">🎨 精品漫剧</button>
-          <button class="nav-item" :class="{ active: currentTab === 'ai-drama' && viewMode === 'catalog' }" @click="switchTab('ai-drama')">🤖 AI 短剧</button>
-          <button class="nav-item" :class="{ active: currentTab === 'history' }" @click="switchTab('history')">🕒 观影历史</button>
-          <button class="nav-item" :class="{ active: currentTab === 'favorites' }" @click="switchTab('favorites')">⭐ 我的收藏</button>
+          
+          <button class="nav-item" :class="{ active: currentTab === 'history' }" @click="switchTab('history')">🕒 本地历史</button>
+          <button class="nav-item" :class="{ active: currentTab === 'cloud-history' }" @click="switchTab('cloud-history')">▶ 红果记录</button>
+          <button class="nav-item" :class="{ active: currentTab === 'cloud-likes' }" @click="switchTab('cloud-likes')">❤ 点赞记录</button>
+          <button class="nav-item" :class="{ active: currentTab === 'cloud-favorites' }" @click="switchTab('cloud-favorites')">★ 收藏记录</button>
+          <button class="nav-item" :class="{ active: currentTab === 'cloud-reserves' }" @click="switchTab('cloud-reserves')">📅 预约记录</button>
         </nav>
       </div>
 
@@ -52,6 +57,32 @@
             </div>
           </div>
         </div>
+
+        <!-- 红果账号入口 -->
+        <button
+          class="account-btn"
+          :class="{ 'logged-in': account.logged_in }"
+          @click="openAccountModal()"
+          :title="account.logged_in ? ('红果账号：' + (account.user?.name || account.user?.user_id || '已登录')) : '扫码登录红果账号'"
+          :aria-label="account.logged_in ? '红果账号与云端记录' : '扫码登录红果账号'"
+        >
+          <span class="account-avatar" aria-hidden="true">{{ account.logged_in ? (account.user?.name || '果').slice(0, 1) : '👤' }}</span>
+          <span class="account-name">{{ account.logged_in ? (account.user?.name || '已登录') : '登录' }}</span>
+        </button>
+
+        <!-- 应用设置入口 -->
+        <button
+          class="header-settings-btn"
+          :class="{ active: showSettingsModal }"
+          @click="openSettingsModal"
+          aria-label="设置"
+          title="设置"
+        >
+          <svg class="header-settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
 
         <!-- 菜单与帮助入口 (类似 Android 三横线菜单图标) -->
         <div class="header-menu-container">
@@ -94,7 +125,7 @@
             </button>
             <button class="dropdown-item" @click="openAboutModal">
               <span class="dropdown-icon">ℹ️</span>
-              <span class="dropdown-label">关于 红果开源播放器</span>
+              <span class="dropdown-label">关于 红果播放器 Plus</span>
             </button>
           </div>
         </div>
@@ -102,130 +133,117 @@
     </header>
 
     <!-- 主体内容区域 -->
-    <main class="app-main" :inert="activeActor ? true : undefined" :aria-hidden="activeActor ? 'true' : undefined">
+    <main class="app-main">
       <!-- 快捷搜索推荐标签 -->
-      <section v-if="viewMode === 'catalog' && currentTab !== 'history' && currentTab !== 'favorites' && currentTab !== 'actors'" class="chips-bar">
+      <section v-if="viewMode === 'catalog' && !isCloudTab && currentTab !== 'history' && currentTab !== 'recommend'" class="chips-bar">
         <span class="chips-label">热门搜索：</span>
         <button v-for="tag in hotTags" :key="tag" class="chip-item" @click="quickSearch(tag)">{{ tag }}</button>
       </section>
 
-      <!-- 剧星榜（演员排行榜）视图 -->
-      <div v-if="viewMode === 'catalog' && currentTab === 'actors'" class="actor-ranking-container">
-        <!-- 榜单横幅介绍 -->
-        <div class="actor-banner">
-          <div class="actor-banner-content">
-            <div class="actor-banner-title-row">
-              <span class="actor-banner-icon">🌟</span>
-              <h2 class="actor-banner-title">红果短剧 · 剧星榜</h2>
-              <span v-if="actorRankDate" class="actor-rank-date-badge">统计截至 {{ actorRankDate }}</span>
-            </div>
-            <p class="actor-banner-desc">按演员参演剧播放量、粉丝关注及全网讨论热度综合排序 · 点击演员卡片查看详细主页与全部参演短剧</p>
+      <!-- 首页推荐：单剧卡片，点击「换一个」或滚动鼠标滚轮推荐另一部 -->
+      <div v-if="viewMode === 'catalog' && currentTab === 'recommend'" class="recommend-container" @wheel.prevent="onRecommendWheel">
+        <div v-if="loadingRecommend && !recommendItem" class="recommend-loading" aria-busy="true">
+          <div class="skeleton-card recommend-skeleton"><div class="skeleton-cover"></div><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+        </div>
+        <div v-else-if="recommendError && !recommendItem" class="empty-state error-state">
+          <span class="empty-icon">⚠️</span>
+          <h3>推荐加载失败</h3>
+          <p>{{ recommendError }}</p>
+          <button class="retry-btn" @click="loadRecommend" style="margin-top: 14px; padding: 8px 20px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: #fff; cursor: pointer;">重试</button>
+        </div>
+        <div v-else-if="recommendItem" class="recommend-card" :class="{ switching: loadingRecommend }">
+          <div class="recommend-cover-wrapper recommend-preview" @click="toggleRecommendPlay" role="button" tabindex="0" @keydown.enter="toggleRecommendPlay" aria-label="播放或暂停推荐预览">
+            <video v-if="recommendStreamUrl" ref="recommendVideoEl" :key="recommendStreamUrl" class="recommend-video" :src="recommendStreamUrl" playsinline autoplay preload="auto" @play="recommendPlaying = true" @pause="recommendPlaying = false" @waiting="recommendBuffering = true" @playing="recommendBuffering = false" @ended="onRecommendEnded" @error="onRecommendPreviewError"></video>
+            <div v-else class="recommend-cover-fallback" :style="{ backgroundImage: `url('${recommendItem.cover}')` }"></div>
+            <div v-if="recommendBuffering && recommendStreamUrl" class="recommend-buffering"><div class="spinner"></div></div>
+            <div v-else-if="recommendStreamUrl && !recommendPlaying" class="recommend-pause-overlay"><span class="recommend-pause-icon">▶</span></div>
+            <span class="episode-badge">第 {{ recommendEpIndex }} 集 / 全 {{ recommendDetail?.total || recommendItem.episode_count || '?' }} 集</span>
+            <button class="recommend-full-btn" @click.stop="watchRecommendFull" title="进入完整播放页（进度条 / 选集 / 倍速等完整功能）">📺 观看完整视频</button>
           </div>
-        </div>
-
-        <!-- 演员性别分类筛选条 -->
-        <div class="actor-filter-bar">
-          <span class="actor-filter-label">演员筛选：</span>
-          <div class="actor-filter-chips">
-            <button
-              class="actor-filter-chip"
-              :class="{ active: actorGender === 'all' }"
-              @click="switchActorGender('all')"
-            >
-              🌟 全部
-            </button>
-            <button
-              class="actor-filter-chip"
-              :class="{ active: actorGender === 'male' }"
-              @click="switchActorGender('male')"
-            >
-              👨 男演员
-            </button>
-            <button
-              class="actor-filter-chip"
-              :class="{ active: actorGender === 'female' }"
-              @click="switchActorGender('female')"
-            >
-              👩 女演员
-            </button>
+          <div class="recommend-info">
+            <h3 class="recommend-title" :title="recommendItem.series_title">{{ recommendItem.series_title }}</h3>
+            <div class="card-tags">
+              <span v-for="(t, i) in (recommendItem.tags || []).slice(0, 4)" :key="i" class="card-tag">{{ t }}</span>
+            </div>
+            <p v-if="recommendItem.description" class="recommend-desc">{{ recommendItem.description }}</p>
+            <div class="recommend-actions">
+              <button class="recommend-next-btn" :disabled="loadingRecommend" @click="loadRecommend">{{ loadingRecommend ? '加载中…' : '🔄 换一个' }}</button>
+            </div>
+            <p class="recommend-hint">点击画面暂停 / 播放；滚轮或「换一个」切换推荐</p>
+            <p v-if="recommendError" class="recommend-error-tip">{{ recommendError }}</p>
           </div>
-        </div>
-
-        <!-- 演员骨架屏加载 -->
-        <div v-if="loadingActors" class="actor-grid" aria-label="正在加载剧星榜" aria-busy="true">
-          <div v-for="n in 8" :key="n" class="skeleton-actor-card" aria-hidden="true">
-            <div class="skeleton-avatar"></div>
-            <div class="skeleton-line" style="width: 60%; margin: 12px auto 6px;"></div>
-            <div class="skeleton-line short" style="width: 40%; margin: 0 auto;"></div>
-          </div>
-        </div>
-
-        <!-- 演员为空状态 -->
-        <div v-else-if="actors.length === 0" class="empty-state">
-          <span class="empty-icon">🎭</span>
-          <h3>暂无剧星榜数据</h3>
-          <p>请稍后刷新重试</p>
-        </div>
-
-        <!-- 演员卡片网格 -->
-        <div v-else class="actor-grid">
-          <div
-            v-for="actor in actors"
-            :key="actor.actor_id"
-            class="actor-card"
-            :class="'rank-top-' + actor.rank"
-            @click="openActorDetail(actor)"
-          >
-            <!-- 排名与名次变化标识 -->
-            <div class="actor-card-header">
-              <div class="actor-rank-badge" :class="'top-' + actor.rank">
-                <span v-if="actor.rank === 1" class="rank-medal">🥇</span>
-                <span v-else-if="actor.rank === 2" class="rank-medal">🥈</span>
-                <span v-else-if="actor.rank === 3" class="rank-medal">🥉</span>
-                <span class="rank-num">TOP {{ actor.rank }}</span>
-              </div>
-              <div class="actor-rank-change" :class="getRankChangeClass(actor.rank_change)">
-                <span v-if="actor.rank_change?.type === 1">▲ {{ actor.rank_change.num || 1 }}</span>
-                <span v-else-if="actor.rank_change?.type === 2">▼ {{ actor.rank_change.num || 1 }}</span>
-                <span v-else>—</span>
-              </div>
-            </div>
-
-            <!-- 头像与人气 -->
-            <div class="actor-avatar-wrapper">
-              <img :src="actor.avatar" :alt="actor.name" class="actor-avatar" loading="lazy" referrerpolicy="no-referrer" @error="onAvatarError" />
-            </div>
-
-            <div class="actor-content">
-              <h3 class="actor-name" :title="actor.name">{{ actor.name }}</h3>
-              <div class="actor-score-tag">
-                <span class="fire-icon">🔥</span> {{ actor.score || '人气热推' }}
-              </div>
-              <div v-if="actor.sub_titles?.length" class="actor-tags">
-                <span v-for="(tag, i) in actor.sub_titles" :key="i" class="actor-tag">{{ tag }}</span>
-              </div>
-              <p v-if="actor.intro" class="actor-intro" :title="actor.intro">{{ actor.intro }}</p>
-            </div>
-
-            <div class="actor-card-footer">
-              <span class="view-works-btn">主页与作品 ❯</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 演员榜分页器 -->
-        <div v-if="actors.length > 0" class="pagination-bar">
-          <button :disabled="actorPage <= 1 || loadingActors" class="page-btn" @click="changeActorPage(-1)">上一页</button>
-          <span class="page-indicator">第 {{ actorPage }} 页</span>
-          <button :disabled="loadingActors || !actorHasMore" class="page-btn" @click="changeActorPage(1)">下一页</button>
         </div>
       </div>
 
       <!-- 剧集卡片网格列表 -->
-      <div v-if="viewMode === 'catalog' && currentTab !== 'actors'" class="catalog-container">
+      <div v-if="viewMode === 'catalog' && currentTab !== 'recommend'" class="catalog-container">
+        <!-- 云端记录标签（播放/点赞/收藏/预约）：复用账号记录列表 -->
+        <template v-if="isCloudTab">
+          <div v-if="!account.logged_in" class="empty-state">
+            <span class="empty-icon">🔐</span>
+            <h3>登录后查看云端记录</h3>
+            <p>扫码登录红果账号，即可同步播放、点赞、收藏与预约记录</p>
+            <button class="retry-btn" style="margin-top: 14px; padding: 8px 20px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: #fff; cursor: pointer;" @click="openAccountModal('login')">扫码登录</button>
+          </div>
+          <div v-else-if="accountRecords[cloudRecordKind].loading && !accountRecords[cloudRecordKind].items.length" class="drama-grid" aria-busy="true">
+            <div v-for="n in 12" :key="n" class="skeleton-card" aria-hidden="true">
+              <div class="skeleton-cover"></div><div class="skeleton-line"></div><div class="skeleton-line short"></div>
+            </div>
+          </div>
+          <div v-else class="account-records-content cloud-records-main">
+            <div v-if="cloudRecordKind === 'reserves'" class="record-subtabs" role="tablist">
+              <button
+                v-for="st in reserveSubTabs"
+                :key="st.key"
+                role="tab"
+                :aria-selected="reserveSubTab === st.key"
+                :class="{ active: reserveSubTab === st.key }"
+                @click="switchReserveSubTab(st.key)"
+              >{{ st.label }}<span class="record-subtab-count">{{ st.count }}</span></button>
+            </div>
+            <div v-if="!visibleRecordItems.length" class="seasons-empty">
+              <p>{{ accountRecords[cloudRecordKind].notice || '该分类暂无记录' }}</p>
+              <button type="button" class="seasons-search-action-btn" @click="loadAccountRecords(cloudRecordKind)">重新加载</button>
+            </div>
+            <div v-else class="record-list">
+              <div
+                v-for="item in visibleRecordItems"
+                :key="item.series_id + ':' + (item.vid || item.reservation_id || '')"
+                class="record-item"
+                :class="{ 'record-upcoming': item.upcoming, 'record-clickable': !item.upcoming && item.series_id }"
+                :role="!item.upcoming && item.series_id ? 'button' : undefined"
+                :tabindex="!item.upcoming && item.series_id ? 0 : undefined"
+                :title="item.upcoming ? '待上线作品，上线后可在预约记录中查看' : '点击从云端进度继续播放'"
+                @click="!item.upcoming && item.series_id && playFromCloudRecord(item)"
+                @keydown.enter="!item.upcoming && item.series_id && playFromCloudRecord(item)"
+              >
+                <img :src="item.cover" class="record-cover" @error="onImageError" alt="" />
+                <div class="record-meta">
+                  <h4 class="record-title" :title="item.title">{{ item.title || '（未知剧名）' }}</h4>
+                  <div class="record-sub">
+                    <span v-if="cloudRecordKind === 'history' && item.episode_index">看到第 {{ item.episode_index }} 集<template v-if="item.episode_count"> / 共 {{ item.episode_count }} 集</template></span>
+                    <span v-if="cloudRecordKind === 'history' && recordProgressText(item)">{{ recordProgressText(item) }}</span>
+                    <span v-if="(cloudRecordKind === 'likes' || cloudRecordKind === 'favorites') && item.episode_count">共 {{ item.episode_count }} 集</span>
+                    <span v-if="cloudRecordKind === 'reserves' && item.upcoming" class="record-upcoming-tag">待上线</span>
+                    <span v-if="cloudRecordKind === 'reserves' && !item.upcoming && item.episode_count">共 {{ item.episode_count }} 集</span>
+                    <span v-if="cloudRecordKind === 'reserves' && item.upcoming && item.publish_at">预计 {{ formatRecordTime(item.publish_at) }} 上线</span>
+                    <span v-if="cloudRecordKind === 'reserves' && !item.upcoming && item.publish_at">{{ formatRecordTime(item.publish_at) }} 上线</span>
+                    <span v-if="cloudRecordKind === 'history' && item.watched_at">{{ formatRecordTime(item.watched_at) }}</span>
+                    <span v-if="cloudRecordKind === 'likes' && item.liked_at">{{ formatRecordTime(item.liked_at) }}</span>
+                    <span v-if="cloudRecordKind === 'favorites' && item.favorited_at">{{ formatRecordTime(item.favorited_at) }}</span>
+                  </div>
+                </div>
+                <span v-if="!item.upcoming && item.series_id" class="record-play-hint" aria-hidden="true">▶</span>
+              </div>
+            </div>
+            <p v-if="accountRecords[cloudRecordKind].notice && accountRecords[cloudRecordKind].items.length" class="record-notice">{{ accountRecords[cloudRecordKind].notice }}</p>
+          </div>
+        </template>
+
+        <template v-else>
         <!-- 加载中指示器 -->
         <div v-if="loadingCatalog" class="drama-grid" aria-label="正在加载短剧" aria-busy="true">
-          <div v-for="n in 8" :key="n" class="skeleton-card" aria-hidden="true">
+          <div v-for="n in 12" :key="n" class="skeleton-card" aria-hidden="true">
             <div class="skeleton-cover"></div><div class="skeleton-line"></div><div class="skeleton-line short"></div>
           </div>
         </div>
@@ -241,8 +259,8 @@
         <!-- 列表空状态 -->
         <div v-else-if="currentDramas.length === 0" class="empty-state">
           <span class="empty-icon">📺</span>
-          <h3>{{ currentTab === 'history' ? '暂无观看历史' : currentTab === 'favorites' ? '暂无收藏短剧' : '暂无相关短剧内容' }}</h3>
-          <p>{{ currentTab === 'history' ? '播放过的短剧会显示在这里' : currentTab === 'favorites' ? '点击短剧海报旁的“收藏”即可快速添加' : currentTab === 'search' ? '未找到相关短剧，换个搜索关键词试试吧' : '换个搜索关键词，或者切换分类标签试试吧' }}</p>
+          <h3>{{ currentTab === 'history' ? '暂无观看历史' : '暂无相关短剧内容' }}</h3>
+          <p>{{ currentTab === 'history' ? '播放过的短剧会显示在这里' : currentTab === 'search' ? '未找到相关短剧，换个搜索关键词试试吧' : '换个搜索关键词，或者切换分类标签试试吧' }}</p>
         </div>
 
         <!-- 卡片网格 -->
@@ -272,11 +290,12 @@
         </div>
 
         <!-- 分页控制器 -->
-        <div v-if="(currentDramas.length > 0 || currentPage > 1) && currentTab !== 'history' && currentTab !== 'favorites'" class="pagination-bar">
+        <div v-if="(currentDramas.length > 0 || currentPage > 1) && currentTab !== 'history'" class="pagination-bar">
           <button :disabled="currentPage <= 1 || loadingCatalog" class="page-btn" @click="changePage(-1)">上一页</button>
           <span class="page-indicator">第 {{ currentPage }} 页</span>
           <button :disabled="loadingCatalog || !hasMore" class="page-btn" @click="changePage(1)">下一页</button>
         </div>
+        </template>
       </div>
 
       <!-- 沉浸式剧场/播放器视图 -->
@@ -290,9 +309,7 @@
               <span class="playing-ep-badge">第 {{ activeEpisodeIndex }} 集 / 全 {{ activeSeries?.total || activeEpisodes.length }} 集</span>
             </div>
             <div class="player-actions">
-              <button class="fav-action-btn" :class="{ favorited: isFavorited }" @click="toggleFavCurrent" :title="isFavorited ? '取消收藏' : '收藏此剧'">
-                {{ isFavorited ? '❤️ 已收藏' : '🤍 收藏' }}
-              </button>
+              <button v-if="currentTab === 'recommend'" class="recommend-switch-btn" :disabled="loadingRecommend" @click="loadRecommend({ theater: true })" title="换一部推荐并直接播放（滚轮同效）">{{ loadingRecommend ? '加载中…' : '🔄 换一个' }}</button>
               <button 
                 class="sidebar-toggle-btn" 
                 :class="{ active: sidebarOpen }" 
@@ -313,7 +330,7 @@
           </div>
 
           <!-- 视频播放核心区 -->
-          <div class="video-stage">
+          <div class="video-stage" @wheel.prevent="handlePlayerWheel">
             <div v-if="osdMessage" class="player-osd" role="status">{{ osdMessage }}</div>
             <video 
               :key="currentStreamUrl"
@@ -341,7 +358,7 @@
             <!-- 居中缓冲加载环 -->
             <div v-if="isBuffering" class="player-buffering">
               <div class="spinner"></div>
-              <span>正在解密加载...</span>
+              <span>正在加载中...</span>
             </div>
 
             <!-- 播放/暂停中心大图标反馈 -->
@@ -354,6 +371,35 @@
               <span class="error-icon">⚠️</span>
               <h4>{{ videoErrorMessage }}</h4>
               <button class="retry-btn" @click="retryCurrentEpisode">重试本集</button>
+            </div>
+
+            <!-- 红果式右侧互动操作栏 -->
+            <div class="player-action-rail">
+              <button
+                class="rail-btn rail-like"
+                :class="{ active: socialState.liked }"
+                :disabled="socialBusy"
+                :title="account.logged_in ? (socialState.liked ? '取消点赞' : '点赞') : '登录后点赞'"
+                @click="toggleLike">
+                <span class="rail-icon">{{ socialState.liked ? '❤️' : '🤍' }}</span>
+                <span class="rail-count">{{ formatCount(socialState.like_count) }}</span>
+              </button>
+              <button
+                class="rail-btn rail-comment"
+                :title="'查看评论'"
+                @click="openComments">
+                <span class="rail-icon">💬</span>
+                <span class="rail-count">{{ formatCount(socialState.comment_count) }}</span>
+              </button>
+              <button
+                class="rail-btn rail-collect"
+                :class="{ active: socialState.collected }"
+                :disabled="socialBusy"
+                :title="account.logged_in ? (socialState.collected ? '取消收藏' : '收藏') : '登录后收藏'"
+                @click="toggleCollect">
+                <span class="rail-icon">{{ socialState.collected ? '⭐' : '☆' }}</span>
+                <span class="rail-count">{{ formatCount(socialState.collect_count) }}</span>
+              </button>
             </div>
           </div>
 
@@ -427,17 +473,6 @@
         <aside v-show="sidebarOpen" id="episode-sidebar" class="theater-sidebar">
           <!-- 短剧信息头部卡片 (点击弹出剧情详细信息) -->
           <div class="sidebar-drama-header" @click="openDramaDetail" title="点击查看短剧详情与完整剧情介绍" role="button" tabindex="0" @keydown.enter="openDramaDetail">
-            <!-- 右上角收藏小红心按钮 (未点亮🤍 / 点亮❤️) -->
-            <button 
-              class="sidebar-fav-icon-btn" 
-              :class="{ favorited: isFavorited }" 
-              @click.stop="toggleFavCurrent" 
-              :title="isFavorited ? '已收藏此剧 (点击取消)' : '收藏此剧 (点击加入收藏)'"
-              :aria-label="isFavorited ? '已收藏此剧' : '收藏此剧'"
-            >
-              <span class="fav-heart-icon">{{ isFavorited ? '❤️' : '🤍' }}</span>
-            </button>
-
             <div class="sidebar-drama-top">
               <img :src="activeSeries?.cover" class="sidebar-cover" @error="onImageError"/>
               <div class="sidebar-meta">
@@ -568,115 +603,83 @@
             </div>
           </div>
         </aside>
+
+        <!-- 评论抽屉 -->
+        <transition name="comments-slide">
+          <div v-if="showComments" class="comments-drawer" @click.self="closeComments">
+            <div class="comments-panel" role="dialog" aria-modal="true" aria-label="本集评论">
+              <div class="comments-header">
+                <h3 class="comments-title">评论 <span class="comments-total">{{ formatCount(comments.total) }}</span></h3>
+                <button class="comments-close" title="关闭" @click="closeComments">✕</button>
+              </div>
+              <div class="comments-body">
+                <div v-if="comments.loading && !comments.items.length" class="comments-state">加载中…</div>
+                <div v-else-if="comments.notice && !comments.items.length" class="comments-state">{{ comments.notice }}</div>
+                <template v-else>
+                  <div v-for="item in comments.items" :key="item.comment_id" class="comment-item">
+                    <img class="comment-avatar" :src="item.user_avatar" :alt="item.user_name" referrerpolicy="no-referrer" @error="onAvatarError" />
+                    <div class="comment-main">
+                      <div class="comment-user">{{ item.user_name }}</div>
+                      <div class="comment-text">{{ item.text }}</div>
+                      <div class="comment-meta">
+                        <span class="comment-time">{{ formatRecordTime(item.created_at) }}</span>
+                        <button
+                          type="button"
+                          class="comment-digg"
+                          :class="{ active: item.liked }"
+                          :disabled="commentLikeBusyId === item.comment_id"
+                          :title="item.liked ? '取消点赞' : '点赞'"
+                          @click="toggleCommentLike(item)"
+                        >👍 {{ item.digg_count ? formatCount(item.digg_count) : '点赞' }}</button>
+                        <button
+                          type="button"
+                          class="comment-reply"
+                          :class="{ active: item.replies_open }"
+                          :disabled="item.replies_loading"
+                          :title="item.replies_open ? '收起回复' : '查看回复'"
+                          @click="toggleCommentReplies(item)"
+                        >💬 {{ formatCount(item.reply_count) }}</button>
+                      </div>
+                      <div v-if="item.replies_open" class="comment-replies">
+                        <div v-if="item.replies_loading" class="comment-replies-state">回复加载中…</div>
+                        <div v-else-if="!item.replies || !item.replies.length" class="comment-replies-state">{{ item.replies_notice || '暂无回复' }}</div>
+                        <template v-else>
+                          <div v-for="r in item.replies" :key="r.reply_id" class="comment-reply-item">
+                            <img class="comment-avatar reply" :src="r.user_avatar" :alt="r.user_name" referrerpolicy="no-referrer" @error="onAvatarError" />
+                            <div class="comment-main">
+                              <div class="comment-user">{{ r.user_name }}</div>
+                              <div class="comment-text">{{ r.text }}</div>
+                              <div class="comment-meta">
+                                <span class="comment-time">{{ formatRecordTime(r.created_at) }}</span>
+                                <span v-if="r.digg_count" class="comment-digg-static">👍 {{ formatCount(r.digg_count) }}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            v-if="item.replies_has_more"
+                            class="comment-replies-more"
+                            :disabled="item.replies_loading"
+                            @click="loadMoreCommentReplies(item)">
+                            {{ item.replies_loading ? '加载中…' : '加载更多回复' }}
+                          </button>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    v-if="comments.has_more"
+                    class="comments-more"
+                    :disabled="comments.loading"
+                    @click="loadMoreComments">
+                    {{ comments.loading ? '加载中…' : '加载更多评论' }}
+                  </button>
+                </template>
+              </div>
+            </div>
+          </div>
+        </transition>
       </div>
     </main>
-
-    <!-- 演员个人主页与参演短剧弹窗 -->
-    <div v-if="activeActor" class="actor-modal-overlay" @click.self="closeActorDetail" @keydown="onActorModalKeydown">
-      <div class="actor-modal" role="dialog" aria-modal="true" tabindex="-1" :aria-label="(activeActor.name || '演员') + '的主页与作品'">
-        <div class="actor-modal-header">
-          <div class="actor-profile-main">
-            <img :src="activeActorDetail?.avatar || activeActor.avatar" :alt="activeActor.name" class="actor-profile-avatar" referrerpolicy="no-referrer" @error="onAvatarError" />
-            <div class="actor-profile-meta">
-              <div class="actor-profile-title-row">
-                <h2 class="actor-profile-name">{{ activeActor.name }}</h2>
-                <span v-if="activeActor.score" class="actor-score-tag"><span class="fire-icon">🔥</span> {{ activeActor.score }}</span>
-                <span v-if="activeActor.rank" class="actor-rank-pill">剧星榜 TOP {{ activeActor.rank }}</span>
-              </div>
-              <p v-if="activeActorDetail?.intro || activeActor.intro" class="actor-profile-intro">
-                {{ activeActorDetail?.intro || activeActor.intro }}
-              </p>
-              <!-- 合作演员推荐 -->
-              <div v-if="activeActorDetail?.related_celebrities?.length" class="related-celebrities-row">
-                <span class="related-label">合作演员：</span>
-                <div class="related-list">
-                  <button
-                    v-for="rel in activeActorDetail.related_celebrities"
-                    :key="rel.actor_id"
-                    class="related-actor-chip"
-                    @click="switchToRelatedActor(rel)"
-                    :title="rel.intro || rel.name"
-                  >
-                    <img :src="rel.avatar" :alt="rel.name" class="related-avatar" referrerpolicy="no-referrer" @error="onAvatarError" />
-                    <span>{{ rel.name }}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <button class="modal-close-btn" @click="closeActorDetail" title="关闭 (Esc)">✕</button>
-        </div>
-
-        <div class="actor-modal-body">
-          <div class="works-section-header">
-            <h3 class="works-title">🎬 参演短剧作品 ({{ actorWorksTotal || actorWorks.length }})</h3>
-            <span class="works-hint">点击任意短剧立即开播</span>
-          </div>
-
-          <!-- 1. 作品加载骨架屏 -->
-          <div v-if="loadingActorWorks" class="drama-grid" aria-label="正在加载作品列表" aria-busy="true">
-            <div v-for="n in 4" :key="n" class="skeleton-card" aria-hidden="true">
-              <div class="skeleton-cover"></div><div class="skeleton-line"></div>
-            </div>
-          </div>
-
-          <!-- 2. 作品加载失败状态 -->
-          <div v-else-if="actorWorksError" class="actor-works-error-box" role="alert">
-            <div class="error-icon">⚠️</div>
-            <p class="error-msg">{{ actorWorksError }}</p>
-            <button class="retry-btn" @click="retryLoadActorWorks">重试加载作品</button>
-          </div>
-
-          <!-- 3. 作品为空状态 -->
-          <div v-else-if="actorWorks.length === 0" class="empty-works">
-            <p>暂未查询到该演员的独立短剧作品，换位演员看看吧</p>
-          </div>
-
-          <!-- 4. 作品卡片网格与分页 -->
-          <div v-else class="actor-works-content">
-            <div class="drama-grid actor-works-grid">
-              <div
-                v-for="work in actorWorks"
-                :key="work.series_id"
-                class="drama-card"
-                @click="playActorWork(work)"
-              >
-                <div class="card-cover-wrapper">
-                  <img :src="work.cover" :alt="work.series_title" loading="lazy" class="card-cover" @error="onImageError"/>
-                  <div class="cover-overlay">
-                    <span class="play-badge">▶ 立即播放</span>
-                  </div>
-                  <span v-if="work.episode_count" class="episode-badge">全 {{ work.episode_count }} 集</span>
-                  <span v-if="work.rec_text" class="rec-badge">{{ work.rec_text }}</span>
-                </div>
-                <div class="card-info">
-                  <h4 class="drama-title" :title="work.series_title">{{ work.series_title }}</h4>
-                  <div v-if="work.sub_title" class="card-tags">
-                    <span class="card-tag">{{ work.sub_title }}</span>
-                  </div>
-                  <p v-if="work.description" class="drama-desc">{{ work.description }}</p>
-                </div>
-              </div>
-            </div>
-
-            <!-- 分页加载更多作品 -->
-            <div v-if="actorWorksHasMore" class="actor-works-load-more">
-              <button
-                class="load-more-btn"
-                :disabled="loadingMoreWorks"
-                @click="loadMoreActorWorks"
-              >
-                <span v-if="loadingMoreWorks" class="spinner-small"></span>
-                <span>{{ loadingMoreWorks ? '正在加载更多作品...' : '加载更多参演短剧 (' + actorWorks.length + '/' + actorWorksTotal + ')' }}</span>
-              </button>
-            </div>
-            <div v-else-if="actorWorks.length > 0 && actorWorksTotal > 0" class="actor-works-all-loaded">
-              <span>已加载全部 {{ actorWorks.length }} 部短剧作品</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
 
     <!-- 短剧详细介绍模态框 -->
     <div v-if="showDramaDetailModal && activeSeries" class="drama-modal-overlay" @click.self="closeDramaDetail" @keydown="onDramaModalKeydown">
@@ -699,9 +702,6 @@
                     <span class="copy-btn-text">{{ titleCopied ? '已复制' : '复制剧名' }}</span>
                   </button>
                 </div>
-                <button class="drama-detail-fav-btn" :class="{ favorited: isFavorited }" @click="toggleFavCurrent">
-                  {{ isFavorited ? '❤️ 已在收藏夹' : '🤍 加入收藏' }}
-                </button>
               </div>
               <div class="drama-detail-stats">
                 <span class="detail-count-badge">共 {{ activeEpisodes.length || activeSeries.total }} 集全</span>
@@ -753,27 +753,6 @@
             </div>
           </div>
 
-          <!-- 演职员表 (有演员信息时展示，可点击查看演员主页) -->
-          <div v-if="activeSeries.celebrities && activeSeries.celebrities.length" class="drama-cast-section">
-            <h4 class="intro-heading">🎬 演职员表 ({{ activeSeries.celebrities.length }})</h4>
-            <div class="drama-cast-list">
-              <div 
-                v-for="actor in activeSeries.celebrities" 
-                :key="actor.actor_id || actor.name"
-                class="drama-cast-card"
-                :class="{ clickable: !!actor.actor_id }"
-                @click="actor.actor_id && openActorFromDrama(actor)"
-                :title="actor.actor_id ? '点击查看演员主页及作品' : actor.name"
-              >
-                <img v-if="actor.avatar" :src="actor.avatar" :alt="actor.name" class="cast-avatar" referrerpolicy="no-referrer" @error="onAvatarError" />
-                <div v-else class="cast-avatar-fallback">👤</div>
-                <div class="cast-info">
-                  <span class="cast-name">{{ actor.name }}</span>
-                  <span v-if="actor.role" class="cast-role">{{ actor.role }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
         <div class="drama-modal-footer">
           <button class="drama-continue-btn" @click="closeDramaDetail">继续播放</button>
@@ -851,11 +830,107 @@
           </div>
         </div>
 
+        <!-- 相关作品与预约下一季（官方相关作品接口，content_type=1007 为待上线可预约） -->
+        <div class="related-works-section">
+          <div class="related-works-header">
+            <strong>🔮 相关作品 · 预约下一季</strong>
+            <button type="button" class="related-refresh-btn" @click="loadRelatedWorks" :disabled="relatedWorksLoading">
+              {{ relatedWorksLoading ? '加载中…' : '刷新' }}
+            </button>
+          </div>
+          <div v-if="relatedWorksLoading && !relatedWorks.length" class="seasons-loading">
+            <div class="spinner"></div><span>正在获取相关作品…</span>
+          </div>
+          <p v-else-if="!relatedWorks.length" class="related-empty">{{ relatedWorksNotice || '暂无相关作品' }}</p>
+          <div v-else class="related-works-list">
+            <div v-for="work in relatedWorks" :key="work.series_id" class="related-work-item" :class="{ upcoming: work.upcoming }">
+              <img :src="work.cover" class="related-cover" @error="onImageError" alt="" />
+              <div class="related-meta">
+                <h4 :title="work.title">{{ work.title || '（未知剧名）' }}</h4>
+                <div class="related-sub">
+                  <span v-if="work.season_label">{{ work.season_label }}</span>
+                  <span v-if="work.upcoming" class="record-upcoming-tag">待上线</span>
+                  <span v-else-if="work.episode_count">共 {{ work.episode_count }} 集</span>
+                </div>
+              </div>
+              <button
+                v-if="work.upcoming"
+                type="button"
+                class="reserve-btn"
+                :class="{ reserved: reservedIds.has(work.series_id), confirming: pendingReserveId === work.series_id }"
+                :disabled="reservedIds.has(work.series_id) || reservingId === work.series_id"
+                :title="reservedIds.has(work.series_id) ? '已在预约记录中' : '点击后需再次确认才会提交预约'"
+                @click.stop="askReserve(work)"
+              >
+                {{ reservedIds.has(work.series_id) ? '已预约' : reservingId === work.series_id ? '提交中…' : pendingReserveId === work.series_id ? '确认预约？' : '预约' }}
+              </button>
+              <button v-else type="button" class="related-play-btn" @click.stop="selectSeason({ series_id: work.series_id, series_title: work.title, cover: work.cover })">播放</button>
+            </div>
+          </div>
+          <p class="related-tip">预约需登录红果账号；提交后会在「预约记录」中回读确认。</p>
+        </div>
+
         <div class="seasons-modal-footer">
           <button type="button" class="seasons-search-fallback-btn" @click="searchSeriesGlobally(seriesBaseTitle)">
             🔍 在全站搜索“{{ seriesBaseTitle }}”全部短剧
           </button>
           <button type="button" class="seasons-close-footer-btn" @click="closeSeasonsModal">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 红果账号弹窗：扫码登录 / 播放记录 / 点赞记录 / 预约记录 -->
+    <div v-if="showAccountModal" class="account-modal-overlay" @click.self="closeAccountModal" @keydown="onAccountModalKeydown">
+      <div class="account-modal" role="dialog" aria-modal="true" tabindex="-1" aria-label="红果账号">
+        <div class="account-modal-header">
+          <div class="account-header-main">
+            <span class="account-header-icon">👤</span>
+            <h3 class="account-header-title">红果账号</h3>
+            <span v-if="account.logged_in" class="account-user-chip">{{ account.user?.name || account.user?.user_id || '已登录' }}</span>
+          </div>
+          <button class="modal-close-btn" @click="closeAccountModal" title="关闭 (Esc)">✕</button>
+        </div>
+
+        <div class="account-tabs" role="tablist">
+          <button role="tab" :aria-selected="accountTab === 'login'" :class="{ active: accountTab === 'login' }" @click="switchAccountTab('login')">{{ account.logged_in ? '账号' : '扫码登录' }}</button>
+        </div>
+
+        <div class="account-modal-body">
+          <!-- 登录 / 账号页 -->
+          <div class="account-login-pane">
+            <template v-if="!account.logged_in">
+              <div class="qr-box">
+                <img v-if="qr.qrcode && (qr.status === 'pending' || qr.status === 'scanned')" :src="qr.qrcode" alt="红果扫码登录二维码" class="qr-img" />
+                <div v-else class="qr-placeholder">
+                  <div v-if="qr.status === 'loading'" class="spinner"></div>
+                  <span v-else>{{ qr.status === 'expired' ? '二维码已过期' : qr.status === 'error' ? '二维码加载失败' : '准备二维码…' }}</span>
+                </div>
+                <div v-if="qr.status === 'scanned'" class="qr-scanned-mask">✅ 已扫码<br />请在手机上确认</div>
+                <div v-if="qr.status === 'expired' || qr.status === 'error'" class="qr-refresh-mask">
+                  <button type="button" @click="startQrLogin">刷新二维码</button>
+                </div>
+              </div>
+              <p v-if="qr.qrcode && (qr.status === 'pending' || qr.status === 'scanned')" class="qr-countdown">二维码剩余 <strong>{{ qr.countdown }}</strong> 秒，过期会自动刷新</p>
+              <p class="qr-tip">打开 <strong>红果免费短剧 App</strong> → 我的 → 扫一扫。二维码约 60 秒有效，请尽快扫码确认。</p>
+              <p v-if="qr.notice" class="qr-notice">{{ qr.notice }}</p>
+              <p class="qr-security-tip">登录凭据仅保存在本机（{{ account.storage_encrypted ? '已加密' : '权限 600 的本地文件' }}），不会上传到任何第三方服务器。扫码登录走官网通道，接口非官方授权，可能随时失效。</p>
+            </template>
+            <template v-else>
+              <div class="account-profile-card">
+                <div class="account-avatar-lg">{{ (account.user?.name || '果').slice(0, 1) }}</div>
+                <div class="account-profile-meta">
+                  <strong>{{ account.user?.name || '红果用户' }}</strong>
+                  <span v-if="account.user?.user_id">UID: {{ account.user.user_id }}</span>
+                  <span v-if="account.expires_at">登录态有效期至 {{ formatRecordTime(account.expires_at) }}</span>
+                </div>
+              </div>
+              <p v-if="account.notice" class="account-warning">{{ account.notice }}</p>
+              <p v-if="!account.storage_encrypted" class="qr-security-tip">提示：当前为服务器模式，凭据以 600 权限明文保存在本机数据目录；桌面版将自动加密。</p>
+              <button type="button" class="account-logout-btn" @click="logoutAccount">退出登录</button>
+            </template>
+          </div>
+
+          <!-- 云端记录已移至主页面导航（播放/点赞/收藏/预约记录标签），弹窗仅保留登录/账号页 -->
         </div>
       </div>
     </div>
@@ -883,6 +958,10 @@
             <div class="shortcut-item">
               <div class="keys"><kbd>↓</kbd> <span class="key-or">/</span> <kbd>PageDown</kbd></div>
               <div class="desc">切换至下一集</div>
+            </div>
+            <div class="shortcut-item">
+              <div class="keys"><span class="mouse-action">滚轮 ↑</span> <span class="key-or">/</span> <span class="mouse-action">滚轮 ↓</span></div>
+              <div class="desc">切换至上一集 / 下一集</div>
             </div>
             <div class="shortcut-item">
               <div class="keys"><kbd>←</kbd> <span class="key-or">/</span> <kbd>→</kbd></div>
@@ -916,14 +995,83 @@
       </div>
     </div>
 
-    <!-- 关于 红果开源播放器 弹窗 -->
+    <!-- 应用设置弹窗 -->
+    <div v-if="showSettingsModal" class="settings-modal-overlay" @click.self="closeSettingsModal">
+      <div class="settings-modal" role="dialog" aria-modal="true" tabindex="-1" aria-label="应用设置">
+        <div class="settings-modal-header">
+          <div class="settings-header-title">
+            <span class="settings-header-icon">⚙️</span>
+            <h3>设置</h3>
+          </div>
+          <button class="modal-close-btn" @click="closeSettingsModal" title="关闭 (Esc)">✕</button>
+        </div>
+        <div class="settings-modal-layout">
+          <!-- 左侧设置菜单 -->
+          <aside class="settings-sidebar">
+            <button
+              class="settings-nav-item"
+              :class="{ active: settingsTab === 'shortcuts' }"
+              @click="switchSettingsTab('shortcuts')"
+            >
+              <span class="settings-nav-icon">⌨️</span>
+              <span class="settings-nav-label">快捷键</span>
+            </button>
+          </aside>
+          <!-- 右侧设置内容 -->
+          <div class="settings-modal-body">
+            <section v-if="settingsTab === 'shortcuts'" class="settings-section">
+              <h4 class="settings-section-title">快捷键</h4>
+              <template v-if="desktopSupport">
+                <div class="setting-row">
+                  <div class="setting-info">
+                    <div class="setting-name">老板键 · 全局隐藏 / 显示应用</div>
+                    <div class="setting-desc">无论窗口是否获得焦点都会生效：按下后立即隐藏播放器，再次按下重新显示</div>
+                  </div>
+                  <div class="setting-control">
+                    <input
+                      v-if="bossKeyRecording"
+                      ref="bossKeyCaptureInput"
+                      class="bosskey-capture-input recording"
+                      type="text"
+                      readonly
+                      value="按下组合键（Esc 取消）..."
+                      aria-label="录制老板键组合键"
+                      @keydown="onBossKeyCapture"
+                      @blur="cancelBossKeyRecording"
+                    />
+                    <button
+                      v-else
+                      type="button"
+                      class="bosskey-capture-input"
+                      :class="{ empty: !bossKeyPending && !bossKeySaved }"
+                      :title="bossKeyPending || bossKeySaved ? '点击重新录制' : '点击录制快捷键'"
+                      @click="startBossKeyRecording"
+                    >
+                      {{ formatBossKeyDisplay(bossKeyPending || bossKeySaved) || '点击设置' }}
+                    </button>
+                  </div>
+                </div>
+                <p class="setting-tip">建议使用 Ctrl / Alt + 字母数字，或 F1 ~ F12 功能键。快捷键全局注册，可能与其他软件冲突；若设置失败请换一个组合键。</p>
+              </template>
+              <p v-else class="setting-tip">全局快捷键（老板键）仅在桌面客户端中可用。</p>
+            </section>
+          </div>
+        </div>
+        <div class="settings-modal-footer">
+          <button v-if="desktopSupport && settingsTab === 'shortcuts'" class="settings-btn ghost" :disabled="!bossKeySaved && !bossKeyPending" @click="clearBossKey">清除老板键</button>
+          <button class="settings-btn confirm" :disabled="settingsTab !== 'shortcuts' || !bossKeyPending" @click="saveBossKey">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 关于 红果播放器 Plus 弹窗 -->
     <div v-if="showAboutModal" class="about-modal-overlay" @click.self="closeAboutModal">
-      <div class="about-modal" role="dialog" aria-modal="true" tabindex="-1" aria-label="关于 红果开源播放器">
+      <div class="about-modal" role="dialog" aria-modal="true" tabindex="-1" aria-label="关于 红果播放器 Plus">
         <div class="about-modal-header">
           <div class="about-brand-row">
             <img class="about-brand-icon" src="/assets/app-icon.png" alt="" width="44" height="44" />
             <div class="about-brand-titles">
-              <h3 class="about-title">红果开源播放器</h3>
+              <h3 class="about-title">红果播放器 Plus</h3>
               <span class="about-version">{{ appVersion ? 'v' + appVersion + ' · ' : '' }}原生桌面客户端</span>
             </div>
           </div>

@@ -14,5 +14,5 @@ if [ ! -d "node_modules" ]; then
   npm install --omit=dev
 fi
 
-echo "🚀 正在启动红果短剧桌面播放器并打开界面..."
+echo "🚀 正在启动红果播放器 Plus 并打开界面..."
 exec node src/server/index.js --open

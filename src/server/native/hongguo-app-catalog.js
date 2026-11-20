@@ -4,9 +4,9 @@ const { cleanTitle, appCover } = require('./hongguo-app-search');
 const SITE = 'https://hongguoduanju.com';
 const CATEGORY_API = '/reading/distribution/category/landpage/v/';
 const RANK_API = '/reading/bookapi/bookmall/cell/change/v';
-const CATEGORIES = { 'real-drama': ['default', 'short_play'], 'comic-drama': ['comic_series', 'comic_series'], 'ai-drama': ['ai_series', 'ai_series'] };
+const CATEGORIES = { 'real-drama': ['default', 'short_play'], 'comic-drama': ['comic_series', 'comic_series'] };
 const RANKS = { 'hot-drama': ['all', 'ranklist_hot_play_sc'], 'hot-real-drama': ['human', 'human_hot_play'],
-  'hot-comic-drama': ['comic_series_rank', 'comic_series_hot_play'], 'hot-ai-drama': ['ai_playlet', 'ai_playlet_hot_play'] };
+  'hot-comic-drama': ['comic_series_rank', 'comic_series_hot_play'] };
 const TIMEOUT_MS = 10000, CACHE_MS = 120000, MAX_SESSIONS = 32, MAX_PAGES = 8;
 const sessions = new Map();
 const appError = (message, code = 'APP_SCHEMA') => Object.assign(new Error(message), { code });
@@ -130,10 +130,10 @@ async function browseList(options = {}) {
     let values = {}, body = null;
     if (ranking) {
       values = { tab_type: pg === 1 ? '26' : '18', client_req_type: '2', client_template: '2', background_selected_items: '',
-        category_id: '0', limit: '20', cell_sub_id: '0', gender: '2', cell_id: '7470092475068071998', selected_items: ranking[0],
+        category_id: '0', limit: '30', cell_sub_id: '0', gender: '2', cell_id: '7470092475068071998', selected_items: ranking[0],
         sub_selected_items: ranking[1], panel_selected_items: '', offset: String(cursor.offset), session_id: cursor.sessionId, filter_ids: '', unlimited_selector_change_type: '0' };
     } else {
-      body = { filter_ids: '', req_scene: CATEGORIES[category][0], offset: cursor.offset, need_selector_panel: pg === 1, limit: 15,
+      body = { filter_ids: '', req_scene: CATEGORIES[category][0], offset: cursor.offset, need_selector_panel: pg === 1, limit: 30,
         select_items: { genre: [CATEGORIES[category][1]], sort: ['hot_score'], category_dim_theme: genre ? [genre] : [],
           category_dim_role: [], category_dim_epoch: [], gender: [], online_time: [], creation_status: [] },
         session_id: cursor.sessionId, req_type: pg === 1 ? 'default' : 'only_content', client_req_type: 3 };
@@ -161,4 +161,4 @@ async function browseList(options = {}) {
   return promise;
 }
 
-module.exports = { browseList, catalogCover };
+module.exports = { browseList, catalogCover, parseVideoCards: cards };

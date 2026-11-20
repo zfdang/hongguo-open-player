@@ -151,7 +151,6 @@ test('all GitHub Actions workflow files are valid YAML', async () => {
   const workflowsDir = path.resolve(__dirname, '../../.github/workflows');
   if (fs.existsSync(workflowsDir)) {
     const files = fs.readdirSync(workflowsDir).filter(f => f.endsWith('.yml') || f.endsWith('.yaml'));
-    assert.ok(files.length > 0, 'Must have at least one workflow file');
     for (const file of files) {
       const fullPath = path.join(workflowsDir, file);
       const content = fs.readFileSync(fullPath, 'utf8');

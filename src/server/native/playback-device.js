@@ -40,13 +40,14 @@ function getDeviceFilePath(customDir) {
     return path.join(dataDir, 'device.json');
 }
 
-function loadPersistedDevice(filePath) {
+const DEVICE_POOL_LIMIT = 6;
+
+function loadPersistedDeviceFile(filePath) {
     try {
-        if (!fs.existsSync(filePath)) return null;
-        const raw = fs.readFileSync(filePath, 'utf8');
-        const data = JSON.parse(raw);
-        if (data && typeof data === 'object' && typeof data.device_id === 'string' && /^\d{10,30}$/.test(data.device_id) && typeof data.iid === 'string' && /^\d{10,30}$/.test(data.iid) && data.cdid) {
-            return Object.freeze({
+        if (!fs.existsSync(filePath)) return { device: null, pool: [] };
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const device = data && typeof data === 'object' && typeof data.device_id === 'string' && /^\d{10,30}$/.test(data.device_id) && typeof data.iid === 'string' && /^\d{10,30}$/.test(data.iid) && data.cdid
+            ? Object.freeze({
                 device_id: String(data.device_id),
                 iid: String(data.iid),
                 cdid: String(data.cdid),
@@ -54,20 +55,43 @@ function loadPersistedDevice(filePath) {
                 created_at: Number(data.created_at) || Date.now(),
                 cookie_jar: data.cookie_jar,
                 session: data.session && typeof data.session === 'object' ? data.session : {},
-            });
-        }
+            })
+            : null;
+        const pool = Array.isArray(data.pool) ? data.pool.map(parsePoolEntry).filter(Boolean) : [];
+        return { device, pool };
     } catch (e) {
         logger.warn('PlaybackDevice', `读取本地设备文件失败: ${e.message}`);
+        return { device: null, pool: [] };
     }
-    return null;
 }
 
-function savePersistedDevice(filePath, device, strict = false) {
+// 池内历史设备：完整会话（cookie_jar/统计）随设备一起保存，切换时无损恢复。
+function parsePoolEntry(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    if (typeof entry.device_id !== 'string' || !/^\d{10,30}$/.test(entry.device_id)) return null;
+    if (typeof entry.iid !== 'string' || !/^\d{10,30}$/.test(entry.iid)) return null;
+    if (!entry.cdid) return null;
+    return Object.freeze({
+        device_id: String(entry.device_id),
+        iid: String(entry.iid),
+        cdid: String(entry.cdid),
+        cookie: sanitizeCookie(entry.cookie, entry.iid),
+        created_at: Number(entry.created_at) || Date.now(),
+        cookie_jar: entry.cookie_jar,
+        session: entry.session && typeof entry.session === 'object' ? entry.session : {},
+    });
+}
+
+function loadPersistedDevice(filePath) {
+    return loadPersistedDeviceFile(filePath).device;
+}
+
+function savePersistedDevice(filePath, device, pool = [], strict = false) {
     try {
         const dir = path.dirname(filePath);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         const tmpPath = `${filePath}.tmp.${Date.now()}`;
-        fs.writeFileSync(tmpPath, JSON.stringify(device, null, 2), { encoding: 'utf8', mode: 0o600 });
+        fs.writeFileSync(tmpPath, JSON.stringify({ ...device, pool }, null, 2), { encoding: 'utf8', mode: 0o600 });
         fs.renameSync(tmpPath, filePath);
     } catch (e) {
         logger.warn('PlaybackDevice', `持久化设备文件失败: ${e.message}`);
@@ -159,13 +183,14 @@ function createPlaybackDeviceRegistrar(options = {}) {
     let currentDevice;
     let rotation;
     let jar;
+    let devicePool = [];
     let lastSavedAt = 0;
     const sameDevice = device => Boolean(device && currentDevice
         && device.device_id === currentDevice.device_id && device.iid === currentDevice.iid && device.cdid === currentDevice.cdid);
     const sessionJar = () => jar ||= createJar(currentDevice);
     const saveSession = (force = false) => {
         if (persist && (force || Date.now() - lastSavedAt >= 30000)) {
-            savePersistedDevice(deviceFilePath, currentDevice);
+            savePersistedDevice(deviceFilePath, currentDevice, devicePool);
             lastSavedAt = Date.now();
         }
     };
@@ -176,7 +201,9 @@ function createPlaybackDeviceRegistrar(options = {}) {
         if (signal?.aborted) return Promise.reject(signal.reason);
         if (currentDevice) return Promise.resolve(currentDevice);
         if (persist) {
-            const loaded = loadPersistedDevice(deviceFilePath);
+            const loadedFile = loadPersistedDeviceFile(deviceFilePath);
+            devicePool = loadedFile.pool;
+            const loaded = loadedFile.device;
             // 老用户场景：若本地记录的是旧版基准静态设备 (DEFAULT_VERIFIED_DEVICE)，不直接作为正式设备，
             // 而是触发在线注册以平滑迁移升级至独有注册设备
             if (loaded && loaded.device_id !== DEFAULT_VERIFIED_DEVICE.device_id) {
@@ -232,7 +259,7 @@ function createPlaybackDeviceRegistrar(options = {}) {
                     jar = initialJar;
                     currentDevice = Object.freeze({ ...deviceObj, cookie_jar: jar.serializeSync(), session: { cookie_updated_at: Date.now() } });
                     if (persist) {
-                        savePersistedDevice(deviceFilePath, currentDevice);
+                        savePersistedDevice(deviceFilePath, currentDevice, devicePool);
                     }
                     logger.info('PlaybackDevice', `匿名设备注册成功: device_id=${device_id}, iid=${iid}`);
                     return currentDevice;
@@ -319,7 +346,13 @@ function createPlaybackDeviceRegistrar(options = {}) {
                 logger.info('PlaybackDevice', '收到用户主动更换设备指令，开始注册全新的独立匿名设备...');
                 const candidate = createPlaybackDeviceRegistrar({ persist: false, fallback: false });
                 const newDevice = await candidate(requestJson);
-                if (persist) savePersistedDevice(deviceFilePath, newDevice, true);
+                // 换下的旧设备入池保留：它可能带有成功取流历史，风控窗口过后是比新设备
+                // 可信得多的轮换候选，不能像旧版一样直接丢弃。
+                if (currentDevice) {
+                    devicePool = [{ ...currentDevice }, ...devicePool.filter(d => d.device_id !== currentDevice.device_id)];
+                    while (devicePool.length > DEVICE_POOL_LIMIT) devicePool.pop();
+                }
+                if (persist) savePersistedDevice(deviceFilePath, newDevice, devicePool, true);
                 currentDevice = newDevice;
                 jar = undefined;
                 registration = undefined;
@@ -330,10 +363,35 @@ function createPlaybackDeviceRegistrar(options = {}) {
         return waitForRegistration(rotation, signal);
     };
 
+    // 从设备池切换到历史可用设备：仅选“有成功取流记录”的候选（最近成功优先），
+    // 当前设备（含其会话统计）入池互换，cookie_jar 无损恢复。池空/无候选返回 null。
+    // 供取流熔断时调用：老设备是上游已信任过的身份，比注册全新设备可靠得多。
+    registrar.rotateToPooledDevice = function rotateToPooledDevice() {
+        if (!currentDevice) return null;
+        const candidates = devicePool
+            .filter(d => d.device_id !== currentDevice.device_id && Number(d.session?.last_success_at) > 0)
+            .sort((a, b) => (Number(b.session?.last_success_at) || 0) - (Number(a.session?.last_success_at) || 0));
+        const pick = candidates[0];
+        if (!pick) return null;
+        devicePool = devicePool.filter(d => d.device_id !== pick.device_id);
+        devicePool.unshift({ ...currentDevice });
+        while (devicePool.length > DEVICE_POOL_LIMIT) devicePool.pop();
+        currentDevice = Object.freeze({ ...pick });
+        jar = createJar(currentDevice);
+        registration = undefined;
+        request = undefined;
+        lastSavedAt = 0;
+        saveSession(true);
+        logger.info('PlaybackDevice', `已从设备池切换至历史可用设备: device_id=${currentDevice.device_id}, iid=${currentDevice.iid}`);
+        return currentDevice;
+    };
+
     registrar.getCurrentDevice = function getCurrentDevice() {
         if (currentDevice) return currentDevice;
         if (persist) {
-            const loaded = loadPersistedDevice(deviceFilePath);
+            const loadedFile = loadPersistedDeviceFile(deviceFilePath);
+            devicePool = loadedFile.pool;
+            const loaded = loadedFile.device;
             if (loaded && loaded.device_id !== DEFAULT_VERIFIED_DEVICE.device_id) {
                 currentDevice = loaded;
                 return currentDevice;
@@ -343,12 +401,16 @@ function createPlaybackDeviceRegistrar(options = {}) {
     };
 
     registrar.fallbackToDefault = function fallbackToDefault() {
+        if (currentDevice && currentDevice.device_id !== DEFAULT_VERIFIED_DEVICE.device_id) {
+            devicePool = [{ ...currentDevice }, ...devicePool.filter(d => d.device_id !== currentDevice.device_id)];
+            while (devicePool.length > DEVICE_POOL_LIMIT) devicePool.pop();
+        }
         currentDevice = DEFAULT_VERIFIED_DEVICE;
         jar = undefined;
         registration = undefined;
         request = undefined;
         if (persist) {
-            savePersistedDevice(deviceFilePath, DEFAULT_VERIFIED_DEVICE);
+            savePersistedDevice(deviceFilePath, DEFAULT_VERIFIED_DEVICE, devicePool);
         }
         logger.info('PlaybackDevice', `已自动切换并持久化基准播放设备: device_id=${currentDevice.device_id}`);
         return currentDevice;

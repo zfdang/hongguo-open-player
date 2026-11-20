@@ -21,7 +21,7 @@ test('late catalog responses cannot replace the active tab; search pagination ke
   const requests = [];
   const state = client(url => url === '/api/search-history' ? Promise.resolve(response([])) : new Promise(resolve => requests.push({ url, resolve })));
   const first = state.loadCatalog();
-  state.switchTab('favorites');
+  state.switchTab('history');
   requests[1].resolve(response([{ series_id: '2' }]));
   await new Promise(resolve => setImmediate(resolve));
   requests[0].resolve(response({ results: [{ series_id: '1' }] }));
@@ -36,10 +36,56 @@ test('late catalog responses cannot replace the active tab; search pagination ke
   requests[3].resolve(response({ results: [], hasMore: false }));
 });
 
+test('recommend previews in catalog; theater wheel switches to next recommendation', async () => {
+  const requests = [];
+  let n = 0;
+  const tick = () => new Promise(resolve => setImmediate(resolve));
+  const state = client(async url => {
+    requests.push(url);
+    if (url === '/api/recommend/next') return response({ success: true, item: { series_id: String(++n), series_title: '剧' + n } });
+    if (url.startsWith('/api/series/')) return response({ series_id: url.split('/').pop(), total: 1, episodes: [{ vid: 'v1', vid_index: 1 }] });
+    return response([]);
+  });
+  await state.loadRecommend();
+  assert.equal(state.recommendItem.value.series_id, '1');
+  assert.equal(state.viewMode.value, 'catalog', '推荐页内嵌预览播放，不直接进剧场');
+  assert.equal(state.recommendDetail.value.series_id, '1');
+  assert.equal(state.recommendStreamUrl.value, '/api/stream/v1');
+  // 剧场滚轮 = 换一部推荐并直接播放
+  state.viewMode.value = 'theater';
+  state.handlePlayerWheel({ deltaY: 120 });
+  await tick(); await tick();
+  assert.equal(state.recommendItem.value.series_id, '2');
+  assert.equal(state.activeSeries.value.series_id, '2');
+  const count = requests.filter(u => u === '/api/recommend/next').length;
+  // 节流内的第二次滚动不再发请求
+  state.handlePlayerWheel({ deltaY: 120 });
+  await tick();
+  assert.equal(requests.filter(u => u === '/api/recommend/next').length, count);
+});
+
+test('switchTab recommend routes to the recommend endpoint with in-page preview, not catalog or theater', async () => {
+  const requests = [];
+  const state = client(async url => {
+    requests.push(url);
+    if (url === '/api/recommend/next') return response({ success: true, item: { series_id: '9', series_title: '剧' } });
+    if (url.startsWith('/api/series/')) return response({ series_id: '9', total: 1, episodes: [{ vid: 'v1', vid_index: 1 }] });
+    return response([]);
+  });
+  state.switchTab('recommend');
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.currentTab.value, 'recommend');
+  assert.ok(requests.includes('/api/recommend/next'));
+  assert.ok(!requests.some(u => u.startsWith('/api/catalog')));
+  assert.equal(state.viewMode.value, 'catalog', '推荐 tab 页内预览播放，不进剧场');
+  assert.equal(state.recommendStreamUrl.value, '/api/stream/v1');
+});
+
 module.exports = { client, response };
 
 test('search from saved lists enters search mode and keeps paging independent of draft input', async () => {
-  for (const tab of ['history', 'favorites']) {
+  for (const tab of ['history']) {
     const requests = [];
     const state = client(async url => {
       requests.push(url);
@@ -98,16 +144,6 @@ test('a pending drama detail cannot reopen theater after navigating away', async
   resolveDetail(response({ series_id: '1', episodes: [{ vid: '1', vid_index: 1 }] }));
   await opening;
   assert.equal(state.viewMode.value, 'catalog');
-});
-
-test('favoriting a long series sends metadata without its full episode list', async () => {
-  let body;
-  const state = client(async (url, options) => { body = JSON.parse(options.body); return response({ is_favorite: true }); });
-  state.activeSeries.value = { series_id: '123', total: 1000, episodes: Array(1000).fill({ title: 'x'.repeat(1000) }) };
-  await state.toggleFavCurrent();
-  assert.equal(body.episode_count, 1000);
-  assert.equal(body.episodes, undefined);
-  assert.ok(JSON.stringify(body).length < 1024);
 });
 
 test('fullscreen Escape preserves theater and select keys do not switch episodes', () => {
@@ -266,352 +302,6 @@ test('clicking controls blurs them and maintains focus on .player-container', ()
   assert.equal(focused, container);
 });
 
-test('actor tab navigation, paging, profile modal and opening drama works', async () => {
-  const requests = [];
-  const state = client(async (url) => {
-    requests.push(url);
-    if (url.startsWith('/api/actors/ranking')) {
-      return response({
-        success: true,
-        rank_date: '2026-10-29',
-        has_more: true,
-        actors: [
-          { actor_id: '7123456789', name: '张三', rank: 1, score: '1000万人气' },
-          { actor_id: '7123456790', name: '李四', rank: 2, score: '800万人气' }
-        ]
-      });
-    }
-    if (url.startsWith('/api/actors/7123456789/works')) {
-      return response({
-        success: true,
-        works: [
-          { series_id: 'series-101', series_title: '热血短剧', cover: 'https://img.test/cover.jpg' }
-        ]
-      });
-    }
-    if (url.startsWith('/api/actors/7123456789')) {
-      return response({
-        success: true,
-        actor: {
-          actor_id: '7123456789',
-          name: '张三',
-          intro: '青年演员',
-          related_actors: [{ actor_id: '7123456799', name: '王五' }]
-        }
-      });
-    }
-    if (url.startsWith('/api/series/series-101')) {
-      return response({
-        series_id: 'series-101',
-        series_title: '热血短剧',
-        episodes: [{ vid: 'v101', vid_index: 1, title: '第1集' }]
-      });
-    }
-    return response({ results: [], hasMore: false });
-  });
-
-  // 1. switchTab('actors')
-  state.switchTab('actors');
-  assert.equal(state.currentTab.value, 'actors');
-  assert.equal(state.actorPage.value, 1);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(requests[0], '/api/actors/ranking?page=1');
-  assert.equal(state.actors.value.length, 2);
-  assert.equal(state.actorRankDate.value, '2026-10-29');
-  assert.equal(state.actorHasMore.value, true);
-
-  // 2. changeActorPage(1)
-  state.changeActorPage(1);
-  assert.equal(state.actorPage.value, 2);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(requests[1], '/api/actors/ranking?page=2');
-
-  // 3. openActorDetail
-  const openPromise = state.openActorDetail(state.actors.value[0]);
-  assert.equal(state.activeActor.value.name, '张三');
-  assert.equal(state.loadingActorWorks.value, true);
-  await openPromise;
-  assert.equal(state.loadingActorWorks.value, false);
-  assert.equal(state.activeActorDetail.value.intro, '青年演员');
-  assert.equal(state.actorWorks.value.length, 1);
-  assert.equal(state.actorWorks.value[0].series_title, '热血短剧');
-
-  // 4. playActorWork transitions into theater and closes modal
-  await state.playActorWork(state.actorWorks.value[0]);
-  assert.equal(state.activeActor.value, null);
-  assert.equal(state.viewMode.value, 'theater');
-  assert.equal(state.activeSeries.value.series_id, 'series-101');
-
-  // 5. Escape closes actor detail if open
-  const listeners = {};
-  const doc = { documentElement: { classList: { add() {} } } };
-  const stateWithKeys = client(async () => response([]), {
-    document: doc,
-    window: { addEventListener: (name, fn) => { listeners[name] = fn; } }
-  });
-  stateWithKeys.mountForTest();
-  stateWithKeys.activeActor.value = { actor_id: '7123456799', name: '王五' };
-  let prevented = false;
-  listeners.keydown({
-    target: { tagName: 'DIV' },
-    code: 'Escape',
-    key: 'Escape',
-    preventDefault: () => { prevented = true; }
-  });
-  assert.equal(prevented, true);
-  assert.equal(stateWithKeys.activeActor.value, null);
-});
-
-test('switching actors discards stale responses to prevent overwriting active actor', async () => {
-  const pendingRequests = new Map(); // url -> resolve
-  const state = client(url => new Promise(resolve => {
-    pendingRequests.set(url, resolve);
-  }));
-
-  // 1. Open Actor A
-  const promiseA = state.openActorDetail({ actor_id: '1001', name: '演员A' });
-  assert.equal(state.activeActor.value.name, '演员A');
-
-  // 2. Immediately switch to Actor B before A responds
-  const promiseB = state.openActorDetail({ actor_id: '1002', name: '演员B' });
-  assert.equal(state.activeActor.value.name, '演员B');
-
-  // 3. Resolve B's requests first
-  pendingRequests.get('/api/actors/1002')(response({
-    success: true,
-    actor: { actor_id: '1002', name: '演员B', intro: 'B的真实简介' }
-  }));
-  pendingRequests.get('/api/actors/1002/works?count=20&offset=0')(response({
-    success: true,
-    works: [{ series_id: 'b-series', series_title: 'B的作品' }],
-    total_count: 1
-  }));
-  await promiseB;
-
-  assert.equal(state.activeActor.value.name, '演员B');
-  assert.equal(state.activeActorDetail.value.name, '演员B');
-  assert.equal(state.activeActorDetail.value.intro, 'B的真实简介');
-  assert.equal(state.actorWorks.value[0].series_title, 'B的作品');
-
-  // 4. Now let A's slow requests arrive late
-  pendingRequests.get('/api/actors/1001')(response({
-    success: true,
-    actor: { actor_id: '1001', name: '演员A', intro: 'A的迟到简介' }
-  }));
-  pendingRequests.get('/api/actors/1001/works?count=20&offset=0')(response({
-    success: true,
-    works: [{ series_id: 'a-series', series_title: 'A的作品' }],
-    total_count: 1
-  }));
-  await promiseA;
-
-  // 5. Must NOT be overwritten by A!
-  assert.equal(state.activeActor.value.name, '演员B');
-  assert.equal(state.activeActorDetail.value.name, '演员B');
-  assert.equal(state.activeActorDetail.value.intro, 'B的真实简介');
-  assert.equal(state.actorWorks.value[0].series_title, 'B的作品');
-});
-
-test('actor works pagination loads batches and appends without duplicates', async () => {
-  const state = client(async (url) => {
-    if (url.includes('/api/actors/8888/works?count=20&offset=0')) {
-      return response({
-        success: true,
-        total_count: 3,
-        has_more: true,
-        works: [
-          { series_id: 's1', series_title: '作品1' },
-          { series_id: 's2', series_title: '作品2' }
-        ]
-      });
-    }
-    if (url.includes('/api/actors/8888/works?count=20&offset=2')) {
-      return response({
-        success: true,
-        total_count: 3,
-        has_more: false,
-        works: [
-          { series_id: 's3', series_title: '作品3' }
-        ]
-      });
-    }
-    if (url.startsWith('/api/actors/8888')) {
-      return response({
-        success: true,
-        actor: { actor_id: '8888', name: '多产演员' }
-      });
-    }
-    return response({ results: [] });
-  });
-
-  await state.openActorDetail({ actor_id: '8888', name: '多产演员' });
-  assert.equal(state.actorWorks.value.length, 2);
-  assert.equal(state.actorWorksTotal.value, 3);
-  assert.equal(state.actorWorksHasMore.value, true);
-
-  // Load next batch
-  await state.loadMoreActorWorks();
-  assert.equal(state.actorWorks.value.length, 3);
-  assert.equal(state.actorWorks.value[2].series_title, '作品3');
-  assert.equal(state.actorWorksHasMore.value, false);
-});
-
-test('actor works failure displays error and retry recovers state', async () => {
-  let shouldFail = true;
-  const state = client(async (url) => {
-    if (url.startsWith('/api/actors/9999/works')) {
-      if (shouldFail) {
-        return { ok: false, status: 502, json: async () => ({ success: false, error: '网络连接超时' }) };
-      }
-      return response({
-        success: true,
-        total_count: 1,
-        has_more: false,
-        works: [{ series_id: 's9', series_title: '重试成功的作品' }]
-      });
-    }
-    return response({
-      success: true,
-      actor: { actor_id: '9999', name: '重试演员' }
-    });
-  });
-
-  await state.openActorDetail({ actor_id: '9999', name: '重试演员' });
-  assert.equal(state.loadingActorWorks.value, false);
-  assert.ok(state.actorWorksError.value.includes('网络连接超时') || state.actorWorksError.value.includes('失败'));
-  assert.equal(state.actorWorks.value.length, 0);
-
-  // Retry loading works
-  shouldFail = false;
-  await state.retryLoadActorWorks();
-  assert.equal(state.actorWorksError.value, '');
-  assert.equal(state.actorWorks.value.length, 1);
-  assert.equal(state.actorWorks.value[0].series_title, '重试成功的作品');
-});
-
-test('stale actor ranking responses do not overwrite current page after switching tabs or pages', async () => {
-  const pendingRequests = new Map();
-  const state = client(url => new Promise(resolve => {
-    pendingRequests.set(url, resolve);
-  }));
-
-  // 1. Enter actors tab
-  state.switchTab('actors');
-  assert.equal(state.currentTab.value, 'actors');
-  assert.equal(state.actorPage.value, 1);
-
-  // Resolve page 1
-  pendingRequests.get('/api/actors/ranking?page=1')(response({
-    success: true,
-    rank_date: '2026-10-29',
-    has_more: true,
-    actors: [{ actor_id: '1', name: '第1页演员1', rank: 1 }]
-  }));
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(state.actors.value[0].name, '第1页演员1');
-
-  // 2. Request page 2
-  state.changeActorPage(1);
-  assert.equal(state.actorPage.value, 2);
-  const p2Resolve = pendingRequests.get('/api/actors/ranking?page=2');
-  assert.ok(p2Resolve);
-
-  // 3. While page 2 is pending, switch to 'hot-drama', then return to 'actors'
-  state.switchTab('hot-drama');
-  assert.equal(state.currentTab.value, 'hot-drama');
-  state.switchTab('actors');
-  assert.equal(state.currentTab.value, 'actors');
-  assert.equal(state.actorPage.value, 1);
-
-  // 4. Resolve the new page 1 request
-  const newP1Resolve = pendingRequests.get('/api/actors/ranking?page=1');
-  newP1Resolve(response({
-    success: true,
-    rank_date: '2026-10-29',
-    has_more: true,
-    actors: [{ actor_id: '1', name: '最新第1页演员', rank: 1 }]
-  }));
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(state.actors.value[0].name, '最新第1页演员');
-
-  // 5. Now the stale page 2 request finally arrives late!
-  p2Resolve(response({
-    success: true,
-    rank_date: '2026-10-29',
-    has_more: true,
-    actors: [{ actor_id: '21', name: '迟到的第2页演员', rank: 21 }]
-  }));
-  await new Promise(resolve => setImmediate(resolve));
-
-  // Must NOT overwrite page 1!
-  assert.equal(state.actorPage.value, 1);
-  assert.equal(state.actors.value[0].name, '最新第1页演员');
-  assert.equal(state.actors.value[0].rank, 1);
-});
-
-test('switching actor gender reloads rankings with gender query and discards stale gender responses', async () => {
-  const pendingRequests = new Map();
-  const state = client(url => new Promise(resolve => {
-    pendingRequests.set(url, resolve);
-  }));
-
-  state.switchTab('actors');
-  assert.equal(state.actorGender.value, 'all');
-
-  // Resolve initial 'all' request
-  pendingRequests.get('/api/actors/ranking?page=1')(response({
-    success: true,
-    rank_date: '2026-10-29',
-    has_more: true,
-    actors: [{ actor_id: '1', name: '全部演员', rank: 1 }]
-  }));
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(state.actors.value[0].name, '全部演员');
-
-  // 1. Advance to page 2 of 'all'
-  state.changeActorPage(1);
-  assert.equal(state.actorPage.value, 2);
-
-  // 2. Switch to 'male' -> must reset actorPage to 1 and request gender=male
-  state.switchActorGender('male');
-  assert.equal(state.actorGender.value, 'male');
-  assert.equal(state.actorPage.value, 1);
-
-  const maleReqKey = '/api/actors/ranking?page=1&limit=20&gender=male';
-  const maleResolve = pendingRequests.get(maleReqKey);
-  assert.ok(maleResolve, `Should have requested ${maleReqKey}`);
-
-  // 3. While male request is in flight, switch to 'female'
-  state.switchActorGender('female');
-  assert.equal(state.actorGender.value, 'female');
-  assert.equal(state.actorPage.value, 1);
-
-  const femaleReqKey = '/api/actors/ranking?page=1&limit=20&gender=female';
-  const femaleResolve = pendingRequests.get(femaleReqKey);
-  assert.ok(femaleResolve, `Should have requested ${femaleReqKey}`);
-
-  // 4. Male request finally arrives late!
-  maleResolve(response({
-    success: true,
-    actors: [{ actor_id: 'm1', name: '男演员1', rank: 4 }]
-  }));
-  await new Promise(resolve => setImmediate(resolve));
-
-  // Must NOT overwrite with male data!
-  assert.notEqual(state.actors.value[0]?.name, '男演员1');
-
-  // 5. Female response arrives
-  femaleResolve(response({
-    success: true,
-    actors: [{ actor_id: 'f1', name: '女演员1', rank: 1 }]
-  }));
-  await new Promise(resolve => setImmediate(resolve));
-
-  // Now active data is female
-  assert.equal(state.actors.value[0].name, '女演员1');
-  assert.equal(state.actorGender.value, 'female');
-});
-
 test('catalog loading failure sets catalogError and retrying clears it', async () => {
   let shouldFail = true;
   const state = client(async () => {
@@ -750,16 +440,14 @@ test('theater sidebar toggle button toggles state and updates responsive button 
   assert.equal(state.sidebarOpen.value, true);
 });
 
-test('index.html layout places favorite button to the left of sidebar-toggle-btn with state icons', () => {
+test('index.html layout places sidebar-toggle-btn in player actions without local favorite', () => {
   const path = require('node:path');
   const html = fs.readFileSync(path.resolve(__dirname, '../../src/client/index.html'), 'utf-8');
   assert.ok(html.includes('class="player-actions"'));
-  
-  const favIndex = html.indexOf('class="fav-action-btn"');
-  const toggleIndex = html.indexOf('class="sidebar-toggle-btn"');
-  assert.ok(favIndex !== -1 && toggleIndex !== -1, 'Both buttons must exist');
-  assert.ok(favIndex < toggleIndex, 'Favorite button must be on the left, sidebar toggle on the right');
-  
+  assert.ok(html.includes('class="sidebar-toggle-btn"'));
+  assert.ok(!html.includes('fav-action-btn'), 'Local favorite button must be removed');
+  assert.ok(!html.includes('toggleFavCurrent'), 'Local favorite handler must be removed');
+
   assert.ok(html.includes('sidebar-toggle-icon'));
   assert.ok(html.includes("sidebarOpen ? '隐藏侧边栏' : '显示侧边栏'"));
 });
@@ -797,55 +485,14 @@ test('drama detail modal state opens on openDramaDetail and closes on Escape/clo
   assert.equal(state.showDramaDetailModal.value, false);
 });
 
-test('index.html includes sidebar drama header with fav heart icon button and drama detail modal with cast section', () => {
+test('index.html includes sidebar drama header and drama detail modal without heart favorite', () => {
   const path = require('node:path');
   const html = fs.readFileSync(path.resolve(__dirname, '../../src/client/index.html'), 'utf-8');
-  assert.ok(html.includes('class="sidebar-fav-icon-btn"'), 'Heart icon button in top right must exist');
-  assert.ok(html.includes('class="fav-heart-icon"'), 'Heart icon must exist');
+  assert.ok(!html.includes('sidebar-fav-icon-btn'), 'Heart icon button must be removed');
+  assert.ok(!html.includes('fav-heart-icon'), 'Heart icon must be removed');
   assert.ok(html.includes('class="sidebar-intro-preview"'), 'Intro preview in sidebar header must exist');
   assert.ok(html.includes('class="drama-modal-overlay"'), 'Drama detail modal overlay must exist');
   assert.ok(html.includes('class="drama-modal"'), 'Drama modal dialog must exist');
-  assert.ok(html.includes('class="drama-cast-section"'), 'Cast section in drama modal must exist');
-  assert.ok(html.includes('openActorFromDrama'), 'Clicking cast card must trigger openActorFromDrama');
-});
-
-test('openActorFromDrama closes drama detail modal and opens actor detail', async () => {
-  let actorDetailRequested = null;
-  const state = client(async (url) => {
-    if (url.includes('/api/actors/')) {
-      actorDetailRequested = url;
-      return response({
-        success: true,
-        actor: {
-          actor_id: '7602119348190205246',
-          name: '王妈',
-          avatar: 'https://example.com/avatar.jpg'
-        },
-        works: []
-      });
-    }
-    return response([]);
-  });
-  state.mountForTest();
-
-  state.activeSeries.value = {
-    series_id: '123',
-    series_title: '测试短剧',
-    celebrities: [
-      { actor_id: '7602119348190205246', name: '王妈', role: '饰 王妈', avatar: 'https://example.com/avatar.jpg' }
-    ]
-  };
-
-  // 1. Open drama detail modal
-  state.openDramaDetail();
-  assert.equal(state.showDramaDetailModal.value, true);
-
-  // 2. Click actor in drama
-  state.openActorFromDrama(state.activeSeries.value.celebrities[0]);
-  assert.equal(state.showDramaDetailModal.value, false, 'Drama detail modal should close');
-  assert.ok(state.activeActor.value, 'Actor modal should open with activeActor set');
-  assert.equal(state.activeActor.value.actor_id, '7602119348190205246');
-  assert.equal(state.activeActor.value.name, '王妈');
 });
 
 test('index.html layout includes header hamburger menu button, dropdown menu, and modals', () => {
@@ -860,6 +507,16 @@ test('index.html layout includes header hamburger menu button, dropdown menu, an
   assert.ok(html.includes('openAboutModal'), 'About modal item must exist');
   assert.ok(html.includes('class="shortcuts-modal"'), 'Shortcuts modal dialog must exist');
   assert.ok(html.includes('class="about-modal"'), 'About modal dialog must exist');
+});
+
+test('index.html has recommend nav and single-drama view, and no AI drama tab', () => {
+  const html = fs.readFileSync(require.resolve('../../src/client/index.html'), 'utf8');
+  assert.ok(html.includes("switchTab('recommend')"), 'Recommend nav button must exist');
+  assert.ok(html.includes('class="recommend-container"'), 'Recommend view container must exist');
+  assert.ok(html.includes('onRecommendWheel'), 'Recommend wheel handler must be bound');
+  assert.ok(html.includes('recommend-next-btn'), 'Recommend next button must exist');
+  assert.ok(!html.includes('ai-drama'), 'AI drama tab must be removed');
+  assert.ok(!html.includes('AI 短剧'), 'AI drama label must be removed');
 });
 
 test('app menu toggles and modals open and close correctly', async () => {
@@ -923,11 +580,11 @@ test('resetDevice triggers POST /api/device/reset and updates currentDeviceId', 
   assert.equal(state.showAppMenu.value, false);
 });
 
-test('onVideoError probes stream endpoint on code 4 and displays device registration failure hint', async () => {
-  const probeRequests = [];
+test('onVideoError probes stream endpoint on code 4 and auto-regenerates device on registration failure', async () => {
+  const requests = [];
   const state = client(async (url, options) => {
+    requests.push({ url, options, method: options?.method || 'GET' });
     if (url.startsWith('/api/stream/')) {
-      probeRequests.push({ url, options });
       return {
         ok: false,
         status: 500,
@@ -937,7 +594,7 @@ test('onVideoError probes stream endpoint on code 4 and displays device registra
         })
       };
     }
-    return response({ results: [] });
+    return response({ success: false });
   });
 
   state.activeSeries.value = { series_id: '1', series_title: '测试短剧' };
@@ -949,11 +606,46 @@ test('onVideoError probes stream endpoint on code 4 and displays device registra
 
   await state.onVideoError();
 
-  assert.equal(probeRequests.length, 1);
-  assert.match(probeRequests[0].url, /\/api\/stream\/vid-123/);
-  assert.equal(probeRequests[0].options?.headers?.Range, 'bytes=0-0');
+  const probe = requests.find(r => r.url.startsWith('/api/stream/'));
+  assert.equal(requests.filter(r => r.url.startsWith('/api/stream/')).length, 1);
+  assert.match(probe.url, /\/api\/stream\/vid-123/);
+  assert.equal(probe.options?.headers?.Range, 'bytes=0-0');
   assert.match(state.videoErrorMessage.value, /播放设备注册受阻（ERR_NETWORK）/);
-  assert.match(state.videoErrorMessage.value, /Clash\/去广告规则/);
+  // 设备注册受阻：自动生成新设备ID（重置失败时给出手动指引）
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(requests.some(r => r.url === '/api/device/reset' && r.method === 'POST'), '应自动调用设备重置');
+  assert.match(state.videoErrorMessage.value, /自动生成新设备ID失败/);
+});
+
+test('onVideoError auto-regenerates device ID and retries once when upstream returns EMPTY_RESPONSE', async () => {
+  const requests = [];
+  const state = client(async (url, options) => {
+    requests.push({ url, method: options?.method || 'GET' });
+    if (url.startsWith('/api/stream/')) {
+      return { ok: false, status: 500, json: async () => ({ code: 'EMPTY_RESPONSE', error: 'App 接口返回空响应，可能是签名或设备鉴权问题' }) };
+    }
+    if (url === '/api/device/reset') return response({ success: true, device: { device_id: 'new-dev-1' } });
+    return response({});
+  });
+  state.activeSeries.value = { series_id: '1', series_title: '测试短剧' };
+  state.activeEpisodes.value = [{ vid: '123', vid_index: 1 }, { vid: '456', vid_index: 2 }];
+  state.activeEpisodeIndex.value = 1;
+  state.videoEl.value = { error: { code: 4, message: 'Format error' }, load() {}, play: async () => {} };
+  await state.onVideoError();
+  assert.match(state.videoErrorMessage.value, /返回空响应/);
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+  // 自动重置成功：调用重置接口、更新设备ID、重试本集（清空错误提示）
+  assert.ok(requests.some(r => r.url === '/api/device/reset' && r.method === 'POST'));
+  assert.equal(state.currentDeviceId.value, 'new-dev-1');
+  assert.equal(state.videoErrorMessage.value, '');
+  // 同一集只自动重置一次：再次出错不再调重置接口
+  const resetCalls = requests.filter(r => r.url === '/api/device/reset').length;
+  state.videoEl.value.error = { code: 4, message: 'Format error' };
+  await state.onVideoError();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests.filter(r => r.url === '/api/device/reset').length, resetCalls);
 });
 
 test('onVideoError displays an unsupported ByteVC2 message', async () => {
@@ -966,19 +658,6 @@ test('onVideoError displays an unsupported ByteVC2 message', async () => {
   state.videoEl.value = { error: { code: 4, message: 'Format error' } };
   await state.onVideoError();
   assert.equal(state.videoErrorMessage.value, '本集使用 ByteVC2 编码，当前播放器暂不支持');
-});
-
-test('onVideoError guides user to regenerate device ID when upstream returns EMPTY_RESPONSE', async () => {
-  const state = client(async url => url.startsWith('/api/stream/')
-    ? { ok: false, status: 500, json: async () => ({ code: 'EMPTY_RESPONSE', error: 'App 接口返回空响应，可能是签名或设备鉴权问题' }) }
-    : response({}));
-  state.activeSeries.value = { series_id: '1', series_title: '测试短剧' };
-  state.activeEpisodes.value = [{ vid: '123', vid_index: 1 }];
-  state.activeEpisodeIndex.value = 1;
-  state.videoEl.value = { error: { code: 4, message: 'Format error' } };
-  await state.onVideoError();
-  assert.match(state.videoErrorMessage.value, /返回空响应/);
-  assert.match(state.videoErrorMessage.value, /生成新的设备ID/);
 });
 
 test('ByteVC2 progressive playback starts on detection and stops on switching episodes', async () => {

@@ -3,7 +3,7 @@ const hg = require('../native/hongguo');
 const hgSearch = require('../native/hongguo-search');
 const hgAppSearch = require('../native/hongguo-app-search');
 const hgCatalog = require('../native/hongguo-app-catalog');
-const hgActor = require('../native/hongguo-actor');
+const hgRecommend = require('../native/hongguo-recommend');
 const appSource = require('../native/app-source');
 const logger = require('./logger');
 
@@ -102,6 +102,13 @@ class DramaService {
   }
 
   /**
+   * 首页推荐：每次返回一部未看过的推荐剧（App 首页单列推荐流）
+   */
+  async recommendNext() {
+    return hgRecommend.nextRecommend();
+  }
+
+  /**
    * 获取剧集详情及全部分集列表
    */
   async getSeriesDetail(seriesId) {
@@ -115,6 +122,13 @@ class DramaService {
       throw new Error('未获取到该短剧的分集列表');
     }
     logger.info('DramaService', `成功获取短剧详情: 《${data.series_title || ''}》(seriesId=${sid}), 共 ${data.episodes.length} 集, 耗时 ${Date.now() - t0}ms`);
+    // 分集点赞/评论数：官方 App 接口按集返回，供播放器右侧互动栏显示（取不到时回退整剧统计）
+    let episodeSocial = null;
+    try {
+      episodeSocial = await appSource.fetchSeriesEpisodeSocial(sid);
+    } catch (err) {
+      logger.warn('DramaService', `获取分集互动数据失败，将回退整剧统计 seriesId=${sid}: ${err.message}`);
+    }
     return {
       series_id: sid,
       series_title: data.series_title || '',
@@ -125,14 +139,22 @@ class DramaService {
       episode_label: data.episode_label || '',
       social_info: data.social_info || null,
       celebrities: Array.isArray(data.celebrities) ? data.celebrities : [],
-      episodes: data.episodes.map(ep => ({
-        vid: String(ep.vid),
-        vid_index: Number(ep.vid_index),
-        title: ep.title ? String(ep.title) : `第 ${ep.vid_index} 集`,
-        series_id: sid,
-        series_title: ep.series_title || data.series_title,
-        cover: ep.cover || data.cover
-      }))
+      episodes: data.episodes.map(ep => {
+        const social = episodeSocial && episodeSocial.episodes.get(String(ep.vid));
+        return {
+          vid: String(ep.vid),
+          vid_index: Number(ep.vid_index),
+          title: ep.title ? String(ep.title) : `第 ${ep.vid_index} 集`,
+          series_id: sid,
+          series_title: ep.series_title || data.series_title,
+          cover: ep.cover || data.cover,
+          ...(social ? {
+            like_count: social.like_count,
+            comment_count: social.comment_count,
+            liked: social.liked
+          } : {})
+        };
+      })
     };
   }
 
@@ -165,26 +187,6 @@ class DramaService {
     };
   }
 
-  /**
-   * 获取剧星榜（演员排行榜）
-   */
-  async getActorRankings(options = {}) {
-    return hgActor.fetchActorRankings(options);
-  }
-
-  /**
-   * 获取演员主页详情
-   */
-  async getActorDetail(actorId) {
-    return hgActor.fetchActorDetail(actorId);
-  }
-
-  /**
-   * 获取演员参演短剧作品
-   */
-  async getActorWorks(actorId, options = {}) {
-    return hgActor.fetchActorWorks(actorId, options);
-  }
 }
 
 module.exports = new DramaService();

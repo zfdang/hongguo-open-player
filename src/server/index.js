@@ -10,7 +10,8 @@ const storeService = require('./services/storeService');
 const logger = require('./services/logger');
 
 const app = express();
-const PORT = process.env.PORT || 8899;
+// Plus 版默认 8900，避免与原版 hongguo-open-player（8899）同时运行时冲突。
+const PORT = process.env.PORT || 8900;
 
 app.use((req, res, next) => {
   res.set({
@@ -79,6 +80,7 @@ app.use(express.static(clientDir));
 function sendApiError(res, error) {
   const status = error.status >= 400 && error.status < 600 ? error.status : 500;
   const messages = {
+    RATE_LIMIT_COOLDOWN: '上游风控冷却中，请稍候自动重试',
     EMPTY_RESPONSE: '上游接口返回空响应，请尝试点击右上角菜单中的“生成新的设备ID”后重试',
     DEVICE_REGISTRATION_FAILED: '播放设备注册暂时失败，请稍后重试',
     ETIMEDOUT: '上游请求超时，请稍后重试',
@@ -152,6 +154,189 @@ app.get('/api/danmaku/:seriesId/:vid', async (req, res) => {
   res.json(result);
 });
 
+// 视频评论（只读，与弹幕同端点不同通道）。cursor 原样回传翻页。
+app.get('/api/video-comments/:seriesId/:vid', async (req, res) => {
+  const { seriesId, vid } = req.params;
+  if (!/^\d{6,30}$/.test(seriesId) || !/^\d{6,30}$/.test(vid)) return res.status(400).json({ error: '剧集编号无效' });
+  const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : '';
+  const result = await require('./native/video-comments').fetchVideoComments({ seriesId, vid, cursor });
+  res.set('Cache-Control', 'no-store');
+  res.json(result);
+});
+
+// 评论写操作（点赞 / 回复）：仅由用户 UI 主动触发，需登录态（sessionid Cookie）。
+const videoCommentsService = () => require('./native/video-comments');
+const commentSessionCookie = () => {
+  const account = accountService();
+  return account.loggedIn() ? account._jar.cookieString() : '';
+};
+
+app.post('/api/video-comments/:seriesId/:vid/:commentId/like', async (req, res) => {
+  const { seriesId, vid, commentId } = req.params;
+  const liked = req.body?.liked;
+  if (!/^\d{6,30}$/.test(seriesId) || !/^\d{6,30}$/.test(vid) || !/^\d{6,30}$/.test(commentId)) {
+    return res.status(400).json({ error: '参数无效' });
+  }
+  if (typeof liked !== 'boolean') return res.status(400).json({ error: '点赞动作无效' });
+  const result = await videoCommentsService().likeVideoComment({
+    seriesId, vid, commentId, liked, cookie: commentSessionCookie(),
+  });
+  res.set('Cache-Control', 'no-store');
+  res.json(result);
+});
+
+// 评论回复列表（只读，匿名可调用）。
+app.get('/api/video-comments/:seriesId/:vid/:commentId/replies', async (req, res) => {
+  const { seriesId, vid, commentId } = req.params;
+  if (!/^\d{6,30}$/.test(seriesId) || !/^\d{6,30}$/.test(vid) || !/^\d{6,30}$/.test(commentId)) {
+    return res.status(400).json({ error: '参数无效' });
+  }
+  // 游标为上游原样透传的字符串偏移，只限制长度防滥用
+  const cursor = typeof req.query.cursor === 'string' && req.query.cursor.length <= 40 ? req.query.cursor : '';
+  const result = await videoCommentsService().fetchCommentReplies({ seriesId, vid, commentId, cursor });
+  res.set('Cache-Control', 'no-store');
+  res.json(result);
+});
+
+// ================= 账号：扫码登录 / 云端记录 / 预约 / 发弹幕 =================
+// 服务内部把所有失败转成中文 notice（success:false），路由只负责参数校验与兜底。
+const accountService = () => require('./native/account').getAccountService();
+const clearSeriesSocialCache = seriesId => require('./native/app-source').clearSeriesSocialCache(seriesId);
+const validSeriesId = value => typeof value === 'string' && /^\d{6,30}$/.test(value.trim());
+
+app.get('/api/account/status', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(accountService().status());
+});
+
+app.post('/api/account/login/qrcode', async (_req, res) => {
+  try {
+    const result = await accountService().startLogin();
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+  } catch (err) { sendApiError(res, err); }
+});
+
+app.post('/api/account/login/poll', async (req, res) => {
+  const token = req.body?.token;
+  if (typeof token !== 'string' || !token.trim() || token.length > 200) {
+    return res.status(400).json({ error: '二维码会话标识无效' });
+  }
+  try {
+    const result = await accountService().pollLogin(token.trim());
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+  } catch (err) { sendApiError(res, err); }
+});
+
+app.post('/api/account/logout', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(accountService().logout());
+});
+
+app.get('/api/account/profile', async (_req, res) => {
+  try { res.json(await accountService().profile()); }
+  catch (err) { sendApiError(res, err); }
+});
+
+app.get('/api/account/history', async (_req, res) => {
+  try {
+    const result = await accountService().history();
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+  } catch (err) { sendApiError(res, err); }
+});
+
+app.get('/api/account/likes', async (_req, res) => {
+  try {
+    const result = await accountService().likes();
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+  } catch (err) { sendApiError(res, err); }
+});
+
+app.get('/api/account/favorites', async (_req, res) => {
+  try {
+    const result = await accountService().favorites();
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+  } catch (err) { sendApiError(res, err); }
+});
+
+app.get('/api/account/reserves', async (_req, res) => {
+  try {
+    const result = await accountService().reserves();
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+  } catch (err) { sendApiError(res, err); }
+});
+
+// 写操作：仅由用户 UI 主动触发。code=0 只是回执，服务内部会回读预约列表确认。
+app.post('/api/account/reserve', async (req, res) => {
+  const seriesId = req.body?.series_id;
+  if (!validSeriesId(seriesId)) return res.status(400).json({ error: '剧集编号无效' });
+  try {
+    logger.info('Account', `用户触发预约下一季: series_id=${seriesId.trim()}`);
+    const result = await accountService().reserve(seriesId.trim());
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+  } catch (err) { sendApiError(res, err); }
+});
+
+// 写操作：点赞/取消点赞（ugc set action_type 3/4），需登录，仅由用户 UI 主动触发。
+app.post('/api/account/like', async (req, res) => {
+  const vid = req.body?.vid;
+  const action = req.body?.action;
+  if (!validSeriesId(vid)) return res.status(400).json({ error: '视频编号无效' });
+  if (!['like', 'unlike'].includes(action)) return res.status(400).json({ error: '点赞动作无效' });
+  try {
+    logger.info('Account', `用户触发点赞: vid=${vid.trim()} action=${action}`);
+    const result = await accountService().setSocialAction({ vid: vid.trim(), actionType: action === 'like' ? 3 : 4 });
+    if (result?.success !== false) clearSeriesSocialCache(req.body?.series_id);
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+  } catch (err) { sendApiError(res, err); }
+});
+
+// 写操作：收藏/取消收藏（视频书架 bookshelf/video/update，App 收藏夹可见），需登录，仅由用户 UI 主动触发。
+app.post('/api/account/collect', async (req, res) => {
+  const seriesId = req.body?.series_id;
+  const action = req.body?.action;
+  if (!validSeriesId(seriesId)) return res.status(400).json({ error: '剧集编号无效' });
+  if (!['collect', 'uncollect'].includes(action)) return res.status(400).json({ error: '收藏动作无效' });
+  try {
+    logger.info('Account', `用户触发收藏: series_id=${seriesId.trim()} action=${action}`);
+    const result = await accountService().setSocialAction({ seriesId: seriesId.trim(), actionType: action === 'collect' ? 1 : 2 });
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+  } catch (err) { sendApiError(res, err); }
+});
+
+// 写操作：播放进度云端上报（read_progress/upload，write_mode=1 同时写进度+历史），需登录。
+// 由播放器在保存本地进度时随同节流上报，使官方 App 播放记录同步可见。
+app.post('/api/account/progress', async (req, res) => {
+  const { series_id: seriesId, vid, episode_index: episodeIndex, position_sec: positionSec, duration_sec: durationSec, episode_count: episodeCount } = req.body || {};
+  if (!validSeriesId(seriesId) || !validSeriesId(vid)) return res.status(400).json({ error: '剧集或视频编号无效' });
+  try {
+    const result = await accountService().reportProgress({
+      seriesId: seriesId.trim(), vid: vid.trim(), episodeIndex, positionSec, durationSec, episodeCount,
+    });
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+  } catch (err) { sendApiError(res, err); }
+});
+
+// 相关作品（含待上线的下一季候选），匿名可读。
+app.get('/api/series/:seriesId/related', async (req, res) => {
+  const { seriesId } = req.params;
+  if (!validSeriesId(seriesId)) return res.status(400).json({ error: '剧集编号无效' });
+  try {
+    const result = await accountService().related(seriesId);
+    res.set('Cache-Control', 'no-store');
+    res.json(result);
+  } catch (err) { sendApiError(res, err); }
+});
+
 // ================= API 路由 =================
 
 /**
@@ -161,6 +346,19 @@ app.get('/api/catalog', async (req, res) => {
   try {
     const { page, category, genre } = req.query;
     const data = await dramaService.catalog({ page, category, genre });
+    res.json(data);
+  } catch (err) {
+    sendApiError(res, err);
+  }
+});
+
+/**
+ * 1.5 首页推荐：每次返回一部未看过的推荐剧（按钮/滚轮触发换一个）
+ */
+app.get('/api/recommend/next', async (req, res) => {
+  try {
+    const data = await dramaService.recommendNext();
+    res.set('Cache-Control', 'no-store');
     res.json(data);
   } catch (err) {
     sendApiError(res, err);
@@ -187,13 +385,11 @@ app.get('/api/series/:seriesId', async (req, res) => {
   try {
     const { seriesId } = req.params;
     const detail = await dramaService.getSeriesDetail(seriesId);
-    // 注入用户本地观看历史及收藏状态
+    // 注入用户本地观看历史
     const savedProgress = storeService.getSeriesProgress(seriesId);
-    const isFav = storeService.isFavorite(seriesId);
     res.json({
       ...detail,
-      saved_progress: savedProgress,
-      is_favorite: isFav
+      saved_progress: savedProgress
     });
   } catch (err) {
     sendApiError(res, err);
@@ -272,62 +468,6 @@ app.post('/api/progress', async (req, res) => {
 });
 
 /**
- * 7. 收藏夹管理
- */
-app.get('/api/favorites', (req, res) => {
-  res.json(storeService.getFavorites());
-});
-
-app.post('/api/favorites/toggle', async (req, res) => {
-  try {
-    const isFav = await storeService.toggleFavorite(req.body);
-    res.json({ success: true, is_favorite: isFav });
-  } catch (err) {
-    sendApiError(res, err);
-  }
-});
-
-/**
- * 8. 剧星榜（演员排行榜）
- */
-app.get('/api/actors/ranking', async (req, res) => {
-  try {
-    const { page, limit, gender } = req.query;
-    const data = await dramaService.getActorRankings({ page, limit, gender });
-    res.json(data);
-  } catch (err) {
-    sendApiError(res, err);
-  }
-});
-
-/**
- * 9. 演员个人主页详情
- */
-app.get('/api/actors/:actorId', async (req, res) => {
-  try {
-    const { actorId } = req.params;
-    const data = await dramaService.getActorDetail(actorId);
-    res.json(data);
-  } catch (err) {
-    sendApiError(res, err);
-  }
-});
-
-/**
- * 10. 演员参演短剧作品列表
- */
-app.get('/api/actors/:actorId/works', async (req, res) => {
-  try {
-    const { actorId } = req.params;
-    const { count, offset } = req.query;
-    const data = await dramaService.getActorWorks(actorId, { count, offset });
-    res.json(data);
-  } catch (err) {
-    sendApiError(res, err);
-  }
-});
-
-/**
  * 11. 前端播放器核心事件/报错上报日志接口
  */
 app.post('/api/client-log', (req, res) => {
@@ -358,17 +498,21 @@ async function openSystemPath(targetPath, isDirectory = false) {
     return true;
   }
   let opened = false;
-  try {
-    const electron = require('electron');
-    if (electron?.shell?.openPath) {
-      const errMsg = await electron.shell.openPath(targetPath);
-      if (!errMsg) {
-        opened = true;
-      } else {
-        logger.warn('System', `electron.shell.openPath 失败: ${errMsg}，尝试系统命令回退`);
+  // 仅 Electron 主进程内尝试 shell.openPath：普通 Node 下 require('electron')
+  // 会触发二进制下载，离线环境会挂起，直接走系统命令回退。
+  if (process.versions.electron) {
+    try {
+      const electron = require('electron');
+      if (electron?.shell?.openPath) {
+        const errMsg = await electron.shell.openPath(targetPath);
+        if (!errMsg) {
+          opened = true;
+        } else {
+          logger.warn('System', `electron.shell.openPath 失败: ${errMsg}，尝试系统命令回退`);
+        }
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
   if (!opened) {
     try {
@@ -472,7 +616,7 @@ async function startServer(preferredPort = PORT) {
     server = await listen(0);
   }
   const actualPort = server.address().port;
-  logger.info('Server', `🚀 红果开源播放器服务已启动: http://127.0.0.1:${actualPort}`);
+  logger.info('Server', `🚀 红果播放器 Plus 服务已启动: http://127.0.0.1:${actualPort}`);
   logger.info('Server', `📄 运行日志文件: ${logger.getLogFilePath()}`);
   return { app, server, port: actualPort };
 }

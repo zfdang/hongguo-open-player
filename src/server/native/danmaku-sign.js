@@ -122,14 +122,16 @@ function newDeviceId(random = randomBytes) {
  * 固定 query 参数。这些值冒充官方 Android 客户端，改动会影响上游风控判定，
  * 非必要不要动。
  */
-function baseParams(deviceId, installId) {
+function baseParams(deviceId, installId, version) {
+  const versionCode = version?.versionCode || '73532';
+  const versionName = version?.versionName || '7.3.5.32';
   return {
     aid: '8662',
     app_name: 'novelread',
-    version_code: '73532',
-    version_name: '7.3.5.32',
-    manifest_version_code: '73532',
-    update_version_code: '73532',
+    version_code: versionCode,
+    version_name: versionName,
+    manifest_version_code: versionCode,
+    update_version_code: versionCode,
     channel: 'update_64',
     device_platform: 'android',
     os: 'android',
@@ -164,8 +166,8 @@ function encodeQuery(pairs) {
 }
 
 /** 键按字典序排序后编码，与 Go 的 url.Values.Encode 行为一致。 */
-function buildQuery({ stampMs, deviceId, installId, random = randomBytes }) {
-  const params = baseParams(deviceId ?? newDeviceId(random), installId ?? newDeviceId(random));
+function buildQuery({ stampMs, deviceId, installId, random = randomBytes, version }) {
+  const params = baseParams(deviceId ?? newDeviceId(random), installId ?? newDeviceId(random), version);
   params._rticket = String(stampMs);
   const pairs = Object.entries(params).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   return encodeQuery(pairs);
@@ -251,8 +253,13 @@ function commentLadon(aid, timestamp, prefix) {
 
 const ARGUS_KEY = Buffer.from('ac1adaae95a7af94a5114ab3b3a97dd80050aa0a39314c40528caec95256c28c', 'hex');
 
-/** 手写 protobuf 组包 + SM3 派生 + 72 轮变换 + AES-128-CBC 封装。 */
-function commentArgus(rawQuery, timestamp, nonce) {
+/** 手写 protobuf 组包 + SM3 派生 + 72 轮变换 + AES-128-CBC 封装。
+ *
+ * `body` 可选：读取请求不带 body 哈希（字段 13 恒为 sm3(16 字节零)，与参考实现
+ * 一致，黄金向量据此断言）；**写请求必须传入真实 body**，字段 13 改为 sm3(body)，
+ * 否则上游对带 body 的写请求做_body 哈希校验时会拒签。字段 14 始终是 query 哈希。
+ */
+function commentArgus(rawQuery, timestamp, nonce, body) {
   const key = ARGUS_KEY;
   const parts = [];
 
@@ -277,7 +284,8 @@ function commentArgus(rawQuery, timestamp, nonce) {
   bytesField(10, Buffer.alloc(8));
   varint(12, BigInt.asUintN(64, BigInt(timestamp) * 2n));
 
-  const bodyHash = sm3(Buffer.alloc(16));
+  const bodyBuf = body === undefined || body === null ? null : Buffer.isBuffer(body) ? body : Buffer.from(String(body), 'utf8');
+  const bodyHash = sm3(bodyBuf && bodyBuf.length ? bodyBuf : Buffer.alloc(16));
   const queryHash = sm3(Buffer.from(rawQuery, 'utf8'));
   bytesField(13, bodyHash.subarray(0, 6));
   bytesField(14, queryHash.subarray(0, 6));
@@ -352,13 +360,13 @@ function commentArgus(rawQuery, timestamp, nonce) {
  * `[2:6]` 进 Ladon，`[6:11]` 进 Argus）。长度不对不会报错，只会算出服务端
  * 拒绝的签名 —— 调用方必须自己保证。
  */
-function signCommentHeaders({ rawQuery, stamp, nonce, aid = '8662' }) {
+function signCommentHeaders({ rawQuery, stamp, nonce, aid = '8662', body }) {
   return {
     'X-Gorgon': commentXGorgon(rawQuery, stamp, nonce),
     'X-Khronos': String(Math.trunc(stamp)),
     'X-SS-Req-Ticket': String(Math.trunc(stamp) * 1000),
     'X-SS-STUB': '',
-    'X-Argus': commentArgus(rawQuery, stamp, nonce),
+    'X-Argus': commentArgus(rawQuery, stamp, nonce, body),
     'X-Ladon': commentLadon(aid, stamp, nonce.subarray(2, 6)),
   };
 }

@@ -131,7 +131,7 @@ async function runComputerUseTest() {
   fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
   // 2. 原生启动 macOS 应用程序并开启 CDP 调试通道
-  console.log('▶ [1/6] 启动原生 macOS 应用程序 (红果开源播放器.app)...');
+  console.log('▶ [1/6] 启动原生 macOS 应用程序 (红果播放器 Plus.app)...');
   const appProc = spawn(APP_PATH, [
     ...APP_ARGS,
     `--user-data-dir=${USER_DATA_DIR}`,
@@ -174,7 +174,7 @@ async function runComputerUseTest() {
 
     const pageTitle = await cdp.eval('document.title');
     console.log(`  应用标题: "${pageTitle}"`);
-    if (!pageTitle.includes('红果开源播放器')) {
+    if (!pageTitle.includes('红果播放器 Plus')) {
       throw new Error(`页面标题未包含预期名称: ${pageTitle}`);
     }
 

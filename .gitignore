@@ -1,9 +1,12 @@
 node_modules/
 dist/
 dist-electron/
-build/bytevc2/
-data/*.json
-data/*.bak
+dist-portable-*/
+dist-pkg-*/
+release/
+data/*
+!data/.gitkeep
+logs/
 *.bak
 .DS_Store
 *.log
@@ -12,3 +15,8 @@ data/*.bak
 # 本地审计与审查记录
 /reviews/
 /docs/review-implementation.md
+.omc
+.workbuddy-ai
+.vscode
+.qoder/
+pr106.diff

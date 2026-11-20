@@ -12,6 +12,7 @@ const { getPlaybackDevice } = require('./playback-device');
 const { deviceKey } = require('./device-session');
 const sm3 = require('./sm3');
 const { PlayerSigner } = require('./argus');
+const { signPlaybackV5 } = require('./v5-sign');
 const { normalizeDownloadQuality, meetsDownloadQuality } = require('./download-quality');
 const localId = () => String(1000000000000000n + BigInt('0x' + crypto.randomBytes(6).toString('hex')));
 const PROCESS_NONCE = crypto.randomBytes(18).toString('base64url');
@@ -31,9 +32,23 @@ const SHORTPLAY_APIS = [
     'https://api5-normal-lq.fqnovel.com/novel/player/video_model/v1/',
     'https://reading.snssdk.com/novel/player/video_model/v1/',
 ];
+// video_tab GET 降级通道：主 POST player 接口间歇性空响应时，用同一设备身份重查
+// 当前分集（hongguoTV 0.16.10 / hongguo-open-player v1.12.4，2026-11-19 实测验证）。
+const TAB_APIS = [
+    'https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/',
+    'https://api5-normal-hl.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/',
+    'https://api5-normal-lf.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/',
+];
 const SEARCH_API = 'https://api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/search/tab/v';
 const VIDEO_UA = 'com.phoenix.read/71332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
 const PLAYBACK_UA = 'com.phoenix.read/74332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)';
+// v5 playback uses the official 7.3.9.32 PGT-AN10 profile (see hongguoTV MobilePlayback.kt).
+const V5_PLAYBACK_UA = 'com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)';
+const V5_PLAYBACK_QUERY = {
+    aid: '8662', app_name: 'novelread', version_code: '74332', version_name: '7.4.3.32',
+    channel: 'vivo_8662_64', device_platform: 'android', device_type: 'PGT-AN10',
+    os_version: '12', update_version_code: '74332',
+};
 const SEARCH_UA = 'com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)';
 const DEVICE = {
     ac: 'wifi', channel: 'update_64', aid: '8662', app_name: 'novelread',
@@ -43,11 +58,17 @@ const DEVICE = {
     update_version_code: '71332', host_abi: 'arm64-v8a', dragon_device_type: 'phone', pv_player: '71332',
     compliance_status: '0', need_personal_recommend: '1', player_so_load: '1', is_android_pad_screen: '0',
 };
-const PLAYBACK_DEVICE = { ...DEVICE, version_code: '74332', version_name: '7.4.3.32',
-    manifest_version_code: '74332', update_version_code: '74332', pv_player: '74332' };
 function str(value, fallback = '') { return String(value == null ? fallback : value).trim(); }
 function cleanUrl(value) { return str(value).replace(/\\\//g, '/').replace(/\\u0026/g, '&').replace(/&amp;/g, '&'); }
 function jsonBody(value) { try { return JSON.parse(value); } catch { return null; } }
+// 19 位大整数 id（series_id/book_id/vid 等）超出 Number 安全范围，JSON.parse 会丢精度
+// （尾部被舍入成 000），后续按 id 查分集必然 404。与 video-comments.parseCommentJson 同一
+// 纪律：解析前把指定键名的长整数字面量加引号变字符串，调用方按需声明键名。
+function guardJsonIdKeys(raw, keys) {
+    if (!Array.isArray(keys) || !keys.length) return raw;
+    const pattern = new RegExp(`("(?:${keys.join('|')})"\\s*:\\s*)(\\d{16,})`, 'g');
+    return raw.replace(pattern, '$1"$2"');
+}
 // 签名对 query 字节级敏感：python urllib.parse.quote 的 ['!'*'()'] 兜底编码行为须保持一致
 function pythonUrlEncode(values) {
     return Object.entries(values).map(([key, value]) => {
@@ -149,23 +170,49 @@ function helios(khronos) {
 
 function branchOf(url, body, khronos) { const bodyMd5 = body ? crypto.createHash('md5').update(body).digest() : Buffer.alloc(16); const q = sm3(url.split('?')[1]); const iv = getIv(getIv(getIv(0x20230928, q), bodyMd5), le32(khronos)); const low = iv & 15; return low - (((low * 171) >> 9) * 3); }
 function playbackRequest(payload, identity, apiBase = VIDEO_API) {
+    // v04.10.03 mobile playback signing. The v3 medusa is rejected with an empty
+    // HTTP 200 by the current player endpoint; v5 binds the registered device
+    // identity into both the query and the medusa plaintext. Search/catalogue
+    // endpoints still use the legacy v3 signer elsewhere in this module.
     const body = gzipSync(Buffer.from(payload));
-    const khronos = Math.floor(Date.now() / 1000);
-    const requestTicket = String(Date.now());
     const { device_id, iid, cdid } = identity || {};
-    const devParams = { ...PLAYBACK_DEVICE, device_id, iid, cdid };
-    const query = pythonUrlEncode({ ...devParams, _rticket: requestTicket });
-    const url = `${apiBase}?${query}`;
-    const signerHeaders = PlayerSigner.headers(query, body, khronos);
+    const values = {
+        ...V5_PLAYBACK_QUERY,
+        iid: iid || '', cdid: cdid || '', device_id: device_id || '',
+    };
+    const { url, headers: signedHeaders } = signPlaybackV5(apiBase, values, body);
     const headers = {
-        'User-Agent': PLAYBACK_UA, Accept: 'application/json; charset=utf-8,application/x-protobuf',
-        'Content-Type': 'application/json; charset=UTF-8', 'Content-Encoding': 'gzip',
-        'sdk-version': '2', 'passport-sdk-version': '5051452', 'x-xs-from-web': '0',
-        'x-ss-dp': '8662',
-        ...signerHeaders,
+        'User-Agent': V5_PLAYBACK_UA, Accept: 'application/json',
+        'Content-Encoding': 'gzip',
+        ...signedHeaders,
     };
     // The transport supplies cookies scoped to the destination from the active session.
     return { url, body, headers };
+}
+
+// GET video_tab 降级：同一注册设备身份 + 同一 v5 签名器（body=null，签名器的
+// ticket 搜索对空 body 同样有效），query 版本覆写为 7.3.9.32（GET 通道校验该
+// 载体），并带 GetVideoModelRequest 的每集参数。
+function tabRequest(vid, identity, apiBase = TAB_APIS[0]) {
+    const { device_id, iid, cdid } = identity || {};
+    const values = {
+        ...V5_PLAYBACK_QUERY,
+        version_code: '73932', version_name: '7.3.9.32',
+        manifest_version_code: '73932', update_version_code: '73932', pv_player: '73932',
+        iid: iid || '', cdid: cdid || '', device_id: device_id || '',
+        video_id: String(vid), video_id_type: '0', device_level: '1',
+        need_all_video_definition: '1', need_mp4_align: '0', use_os_player: '0',
+        video_platform: '1024', source: '0', from_video_id: '',
+    };
+    const { url, headers: signedHeaders } = signPlaybackV5(apiBase, values, null);
+    return {
+        url,
+        headers: {
+            'User-Agent': V5_PLAYBACK_UA,
+            Accept: 'application/json; charset=utf-8',
+            ...signedHeaders,
+        },
+    };
 }
 
 function shortplayRequest(vid, identity, apiBase = SHORTPLAY_API) {
@@ -266,7 +313,7 @@ function getActiveMetadataDevice() {
     return metadataDevice;
 }
 function signedMetadataRequest(apiPath, values = {}, payload = null) {
-    if (!['/reading/distribution/category/landpage/v/', '/reading/bookapi/bookmall/cell/change/v', '/reading/user/celebrity/homepage/v1/', '/reading/user/celebrity/works/v1/'].includes(apiPath)) {
+    if (!['/reading/distribution/category/landpage/v/', '/reading/bookapi/bookmall/cell/change/v', '/reading/bookapi/bookmall/cell/change/v1/', '/reading/bookapi/bookmall/tab/v1/', '/reading/user/celebrity/homepage/v1/', '/reading/user/celebrity/works/v1/'].includes(apiPath)) {
         throw new Error('不支持的 App 目录接口');
     }
     const targetDevice = getActiveMetadataDevice();
@@ -289,6 +336,61 @@ function signedMetadataRequest(apiPath, values = {}, payload = null) {
         'x-helios': helios(khronos), 'x-medusa': buildMedusa(url, body, khronos, targetDevice), 'x-tt-dt': '',
     };
     if (body) { headers['Content-Type'] = 'application/json; charset=utf-8'; headers['x-ss-stub'] = md5(body); }
+    return { url, headers, body };
+}
+
+// 账号接口签名（登录态 Cookie 由调用方自行携带，不走 requestJson 的匿名设备 Cookie 注入）。
+// 证据：jackotom/hongguo-player account-session.js signedAccountRequest（GET 72232）；
+// N3urda/hongguoTV CloudAccount.kt（带 body 写请求 73932/7.3.9.32，gzip 时加 Content-Encoding）。
+const ACCOUNT_API_ALLOWLIST = [
+    '/reading/user/info/v1/',
+    '/reading/bookapi/read_history/list/v1/',
+    '/reading/bookapi/read_progress/list/v1/',
+    '/reading/bookapi/multi-detail/v1/',
+    '/reading/bookapi/bookshelf/video/info/v1/',
+    '/reading/bookapi/bookshelf/video/update/v1/',
+    '/reading/ugc/action/mget/v1/',
+    '/reading/user/subscribe/list/v0/',
+    '/reading/bookapi/search/uncover_subscribe/v1/',
+    '/reading/bookapi/plan/v:version/',
+    '/reading/ugc/action/set/v1/',
+    '/reading/bookapi/read_progress/upload/v1/',
+];
+function signedAccountRequest(apiPath, values = {}, identity, { payload = null, gzip = false, host = 'api5-normal-sinfonlinea.fqnovel.com' } = {}) {
+    if (!ACCOUNT_API_ALLOWLIST.includes(apiPath)) throw Object.assign(new Error('不支持的账号接口'), { code: 'APP_INPUT' });
+    if (![identity?.device_id, identity?.iid].every(value => typeof value === 'string' && /^\d{1,30}$/.test(value) && /[1-9]/.test(value))
+        || typeof identity?.cdid !== 'string' || !/^[a-f0-9-]{36}$/i.test(identity.cdid)) {
+        throw Object.assign(new Error('账号请求设备身份无效'), { code: 'APP_INPUT' });
+    }
+    const write = payload !== null;
+    const versionCode = write ? '73932' : '72232';
+    const versionName = write ? '7.3.9.32' : '7.2.2.32';
+    const device = { ...DEVICE, version_code: versionCode, version_name: versionName, manifest_version_code: versionCode,
+        update_version_code: versionCode, pv_player: versionCode, iid: identity.iid, device_id: identity.device_id, cdid: identity.cdid };
+    // payload 允许传原始 JSON 文本：预约 item_id 为 19 位大整数，Number 序列化会丢精度。
+    const body = write ? (gzip ? gzipSync(Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload))) : Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload))) : null;
+    const khronos = Math.floor(Date.now() / 1000), ticketBase = Date.now();
+    let requestTicket = ticketBase, query = '', url = '';
+    for (let n = 0; n < 128; n += 1) {
+        requestTicket = ticketBase + n;
+        query = pythonUrlEncode({ ...values, ...device, ts: String(khronos), _rticket: String(requestTicket) });
+        url = `https://${host}${apiPath}?${query}`;
+        if (branchOf(url, body, khronos) === 0) break;
+        if (n === 127) throw new Error('无法生成账号请求签名');
+    }
+    const headers = {
+        'User-Agent': SEARCH_UA.replace('72232', versionCode), Accept: 'application/json; charset=utf-8,application/x-protobuf',
+        'x-ss-req-ticket': String(requestTicket), 'x-tt-request-tag': 't=0;n=0', 'sdk-version': '2',
+        'passport-sdk-version': '50561', 'x-xs-from-web': '0', 'x-khronos': String(khronos),
+        'x-ladon': be32(khronos).toString('base64'), 'x-argus': le32(khronos).toString('base64'),
+        'x-gorgon': xGorgon(query, body, khronos, Math.floor(Math.random() * 65536)), 'x-helios': helios(khronos),
+        'x-medusa': buildMedusa(url, body, khronos, device), 'x-tt-dt': '',
+    };
+    if (body) {
+        headers['Content-Type'] = 'application/json; charset=utf-8';
+        headers['x-ss-stub'] = md5(body);
+        if (gzip) headers['Content-Encoding'] = 'gzip';
+    }
     return { url, headers, body };
 }
 
@@ -373,7 +475,8 @@ async function requestJson(url, options, deadline, signal) {
             response = await axios({
                 ...transportOptions, headers, url, timeout, signal, maxRedirects: 0,
                 responseType: 'text', transformResponse: [(data) => data],
-                maxContentLength: 2 * 1024 * 1024, maxBodyLength: 1024 * 1024,
+                // 推荐 feed 单批响应远大于账号接口（N3urda/hongguoTV 用 16 MiB 上限），允许调用方按需放宽。
+                maxContentLength: options.maxContentLength || 2 * 1024 * 1024, maxBodyLength: 1024 * 1024,
                 validateStatus: () => true,
             });
         } catch (error) {
@@ -386,7 +489,7 @@ async function requestJson(url, options, deadline, signal) {
                 ? 'App 片源请求超时' : 'App 片源网络请求失败，请稍后重试'), { code, requestId });
         }
         const raw = typeof response.data === 'string' ? response.data : '';
-        const parsed = typeof response.data === 'string' ? jsonBody(raw) : response.data;
+        const parsed = typeof response.data === 'string' ? jsonBody(guardJsonIdKeys(raw, options.jsonGuardKeys)) : response.data;
         const businessCode = Number(parsed?.Code ?? parsed?.code ?? parsed?.status_code ?? 0);
         const outcome = response.status !== 200 ? `HTTP_${response.status}` : !raw.trim() && typeof response.data === 'string'
             ? 'EMPTY_RESPONSE' : !parsed || typeof parsed !== 'object' ? 'INVALID_RESPONSE'
@@ -433,8 +536,32 @@ const entryCache = new Map();
 const preferredRouteByDevice = new Map();
 const inFlightEntryRequests = new Map();
 const SHORTPLAY_PREF_TTL_MS = 300000;
+const TAB_PREF_TTL_MS = 600000;
 const FRESH_DEVICE_SYNC_WINDOW_MS = 15000;
 const FRESH_DEVICE_RETRY_DELAY_MS = 1500;
+// 全链空响应熔断：全域名轮询失败大概率是设备级风控限频窗口（实测 44 秒 124 请求
+// 全败），继续高频重试只会延长惩罚窗口。冷却期内取址直接快速失败，客户端按
+// RATE_LIMIT_COOLDOWN 长退避后自动恢复；换新设备（新身份）不继承冷却。
+const PLAYBACK_COOLDOWN_MS = 60000;
+const playbackCooldownByDevKey = new Map();
+let lastPoolRotateAt = 0;
+function inPlaybackCooldown(devKey) {
+    return (playbackCooldownByDevKey.get(devKey) || 0) > Date.now();
+}
+function markPlaybackCooldown(devKey) {
+    if (!devKey) return;
+    playbackCooldownByDevKey.set(devKey, Date.now() + PLAYBACK_COOLDOWN_MS);
+    while (playbackCooldownByDevKey.size > 32) {
+        playbackCooldownByDevKey.delete(playbackCooldownByDevKey.keys().next().value);
+    }
+}
+// 冷却标记时从设备池轮换到“有成功取流历史”的老设备（上游已信任过的身份，
+// 比注册全新设备可靠得多）；5 分钟内最多轮换一次，防止池内候选连环失败形成轮换风暴。
+function tryRotateToPooledDevice() {
+    if (Date.now() - lastPoolRotateAt < 5 * 60 * 1000) return null;
+    lastPoolRotateAt = Date.now();
+    return getPlaybackDevice.rotateToPooledDevice();
+}
 
 function clearEntryCache(vid) {
     if (vid) {
@@ -582,18 +709,24 @@ function setPreferredRoute(devKey, kind, apiBase) {
     preferredRouteByDevice.delete(devKey);
     preferredRouteByDevice.set(devKey, kind === 'shortplay'
         ? { kind, apiBase, expires: Date.now() + SHORTPLAY_PREF_TTL_MS }
-        : { kind, apiBase });
+        : kind === 'tab'
+            ? { kind, apiBase, expires: Date.now() + TAB_PREF_TTL_MS }
+            : { kind, apiBase });
     while (preferredRouteByDevice.size > 32) {
         preferredRouteByDevice.delete(preferredRouteByDevice.keys().next().value);
     }
 }
 
 function buildPlaybackSteps(devKey) {
+    const tabSteps = TAB_APIS.map(apiBase => ({ kind: 'tab', apiBase }));
     const pref = getPreferredRoute(devKey);
+    if (pref?.kind === 'tab' && TAB_APIS.includes(pref.apiBase)) {
+        return [{ kind: 'tab', apiBase: pref.apiBase }, ...tabSteps.filter(s => s.apiBase !== pref.apiBase)];
+    }
     if (pref?.kind === 'shortplay') {
         const restShortplay = SHORTPLAY_APIS.filter(api => api !== pref.apiBase).map(apiBase => ({ kind: 'shortplay', apiBase }));
         const multiSteps = VIDEO_APIS.map(apiBase => ({ kind: 'multi', apiBase }));
-        return [{ kind: 'shortplay', apiBase: pref.apiBase }, ...multiSteps, ...restShortplay];
+        return [{ kind: 'shortplay', apiBase: pref.apiBase }, ...multiSteps, ...restShortplay, ...tabSteps];
     }
     const orderedMulti = pref?.kind === 'multi' && VIDEO_APIS.includes(pref.apiBase)
         ? [pref.apiBase, ...VIDEO_APIS.filter(api => api !== pref.apiBase)]
@@ -601,6 +734,7 @@ function buildPlaybackSteps(devKey) {
     return [
         ...orderedMulti.map(apiBase => ({ kind: 'multi', apiBase })),
         ...SHORTPLAY_APIS.map(apiBase => ({ kind: 'shortplay', apiBase })),
+        ...tabSteps,
     ];
 }
 
@@ -643,6 +777,23 @@ async function runPlaybackSteps(steps, vid, payload, device, execRequestJson, de
                 const hasEntry = Boolean(resp?.data?.[vid] || entryCache.get(vid)?.entry);
                 if (hasEntry) setPreferredRoute(devKey, 'multi', step.apiBase);
                 return { response: resp, allEmpty: false };
+            }
+
+            if (step.kind === 'tab') {
+                const signed = tabRequest(vid, device, step.apiBase);
+                const resp = await execRequestJson(signed.url, { method: 'GET', headers: signed.headers }, deadline, signal);
+                if (Number(resp?.Code || resp?.code || 0) !== 0) continue;
+                // video_tab 返回 data.video_model_data[vid].video_model（可能为 JSON
+                // 字符串），归一化为 POST player 响应同构形状，下游解析零改动。
+                const rows = resp?.data?.video_model_data || resp?.data || {};
+                const row = rows[vid];
+                const rawModel = row?.video_model;
+                const model = typeof rawModel === 'string' ? jsonBody(rawModel) : rawModel;
+                if (!model || !Array.isArray(model.video_list) || model.video_list.length === 0) continue;
+                const normalized = { code: 0, data: { [vid]: { video_model: model } } };
+                cacheResponseEntries(normalized);
+                setPreferredRoute(devKey, 'tab', step.apiBase);
+                return { response: normalized, allEmpty: false };
             }
 
             const shortSigned = shortplayRequest(vid, device, step.apiBase);
@@ -712,15 +863,19 @@ async function resolveUpstreamEntry(vid, batch, refresh, callerSignal) {
     const job = { controller, waiters: new Set(), promise: null };
     job.promise = (async () => {
         const payload = JSON.stringify({
-            dr_scene: 'player',
-            biz_param: { detail_page_version: 0, device_level: 3, disable_digg_stat: false, need_all_video_definition: true, need_mp4_align: false, use_os_player: false, use_server_dns: false, video_platform: 1024 },
+            biz_param: { detail_page_version: 0, device_level: 1, disable_digg_stat: false, disable_video_relate_book: false, need_all_video_definition: true, need_mp4_align: false, use_os_player: false, use_server_dns: false, video_platform: 1024 },
             mixed_video_id_map: { '1004': batch },
+            dr_scene: 'player',
         });
         const playbackId = crypto.randomUUID();
         const execRequestJson = (url, requestOptions, ...args) => (module.exports.requestJson || requestJson)(url,
             { ...requestOptions, diagnostics: { playback_id: playbackId, vid } }, ...args);
         const device = await getPlaybackDevice(execRequestJson, internalSignal);
-        const steps = buildPlaybackSteps(deviceKey(device));
+        const devKey = deviceKey(device);
+        if (inPlaybackCooldown(devKey)) {
+            throw Object.assign(new Error('上游风控冷却中，稍后自动恢复'), { code: 'RATE_LIMIT_COOLDOWN', status: 503 });
+        }
+        const steps = buildPlaybackSteps(devKey);
         let result = await runPlaybackSteps(steps, vid, payload, device, execRequestJson, deadline, internalSignal);
 
         if (!result.response && result.allEmpty && device?.created_at
@@ -733,8 +888,23 @@ async function resolveUpstreamEntry(vid, batch, refresh, callerSignal) {
                 { kind: 'multi', apiBase: VIDEO_API },
                 { kind: 'shortplay', apiBase: SHORTPLAY_API },
                 { kind: 'shortplay', apiBase: 'https://api5-normal-lq.fqnovel.com/novel/player/video_model/v1/' },
+                ...TAB_APIS.map(apiBase => ({ kind: 'tab', apiBase })),
             ];
             result = await runPlaybackSteps(retrySteps, vid, payload, device, execRequestJson, deadline, internalSignal);
+        }
+
+        if (result.response) {
+            // 任一通道成功即撤销冷却：冷却只是限频窗口的保守估计，上游恢复后不应残留。
+            playbackCooldownByDevKey.delete(devKey);
+        } else if (result.allEmpty && result.lastError?.code === 'EMPTY_RESPONSE') {
+            // 标记冷却并以冷却错误返回：客户端收到 RATE_LIMIT_COOLDOWN 会走长退避
+            // 而不触发“空响应自动换设备”——避免零信任的新设备绕过熔断继续风暴。
+            markPlaybackCooldown(devKey);
+            // 同步尝试设备池轮换：切到历史可用设备后，退避重试将以新身份（无冷却）
+            // 直连上游，若该设备已被放行则直接恢复播放。
+            const rotated = tryRotateToPooledDevice();
+            if (rotated) logger.info('AppSource', `已轮换至设备池历史可用设备 device_id=${rotated.device_id}，退避后将以新身份重试`);
+            throw Object.assign(new Error('上游风控冷却中，稍后自动恢复'), { code: 'RATE_LIMIT_COOLDOWN', status: 503 });
         }
 
         if (!result.response) {
@@ -790,4 +960,68 @@ async function fetchAppPlayUrl(vid, options = {}) {
     return await parseEntryPlayInfo(vid, currentEntry, requestedQuality, allowLowerQuality, deadline, signal, options.allowBytevc2 === true, allowHevc, allowHevcTranscode);
 }
 
-module.exports = { fetchAppPlayUrl, clearEntryCache, isHevcCodec, signedSearchRequest, signedMetadataRequest, parseSearchInteger, requestJson, playbackRequest, shortplayRequest, SEARCH_API, SEARCH_UA };
+// 分集互动统计（点赞/评论数按集返回，与红果 App 右侧互动栏一致）
+const SOCIAL_API = 'https://reading.snssdk.com/novel/player/multi_video_detail/preload/v1';
+const SOCIAL_API_FALLBACK = 'https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_detail/preload/v1';
+const SOCIAL_CACHE_TTL_MS = 3 * 60 * 1000;
+const socialCache = new Map();
+
+async function fetchSeriesEpisodeSocial(seriesId, callerSignal) {
+    const sid = String(seriesId || '').trim();
+    if (!/^\d{1,30}$/.test(sid)) throw new Error('剧集编号无效');
+    const cached = socialCache.get(sid);
+    if (cached && cached.expires > Date.now()) return cached.data;
+
+    const deadline = Date.now() + 12000;
+    const timeoutSignal = AbortSignal.timeout(12000);
+    const signal = callerSignal ? AbortSignal.any([timeoutSignal, callerSignal]) : timeoutSignal;
+    const payload = JSON.stringify({
+        biz_param: { detail_page_version: 0, device_level: 1, disable_digg_stat: false, disable_video_relate_book: false, need_all_video_definition: true, need_mp4_align: false, use_os_player: false, use_server_dns: false, video_platform: 1024 },
+        series_id: sid,
+        dr_scene: 'preload',
+    });
+    const playbackId = crypto.randomUUID();
+    const execRequestJson = (url, requestOptions, ...args) => requestJson(url,
+        { ...requestOptions, diagnostics: { playback_id: playbackId } }, ...args);
+    const device = await getPlaybackDevice(execRequestJson, signal);
+
+    let response = null;
+    let lastError = null;
+    for (const apiBase of [SOCIAL_API, SOCIAL_API_FALLBACK]) {
+        try {
+            const signed = playbackRequest(payload, device, apiBase);
+            response = await execRequestJson(signed.url, { method: 'POST', headers: signed.headers, data: signed.body }, deadline, signal);
+            if (response?.data?.[sid]?.video_data) break;
+        } catch (error) {
+            lastError = error;
+            response = null;
+        }
+    }
+    const videoData = response?.data?.[sid]?.video_data;
+    if (!videoData) throw lastError || Object.assign(new Error('分集互动接口未返回数据'), { code: 'MISSING_SOCIAL' });
+
+    const episodes = new Map();
+    for (const item of Array.isArray(videoData.video_list) ? videoData.video_list : []) {
+        const vid = str(item?.vid);
+        if (!vid) continue;
+        episodes.set(vid, {
+            like_count: Number(item.digged_count) || 0,
+            comment_count: Number(item.comment_count) || 0,
+            liked: Boolean(item.user_digg),
+        });
+    }
+    const data = {
+        series_like_count: Number(videoData.digg_cnt) || 0,
+        liked: Boolean(videoData.has_digg),
+        episodes,
+    };
+    socialCache.set(sid, { expires: Date.now() + SOCIAL_CACHE_TTL_MS, data });
+    return data;
+}
+
+function clearSeriesSocialCache(seriesId) {
+    const sid = String(seriesId || '').trim();
+    if (sid) socialCache.delete(sid);
+}
+
+module.exports = { fetchAppPlayUrl, fetchSeriesEpisodeSocial, clearSeriesSocialCache, clearEntryCache, isHevcCodec, signedSearchRequest, signedMetadataRequest, signedAccountRequest, parseSearchInteger, requestJson, playbackRequest, shortplayRequest, SEARCH_API, SEARCH_UA };

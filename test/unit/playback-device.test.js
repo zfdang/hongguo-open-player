@@ -233,18 +233,18 @@ test('rotateDevice registers fresh identity and replaces the persisted device', 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-rotate-'));
   try {
     const existing = {
-      device_id: '111111111111111',
-      iid: '222222222222222',
-      cdid: '11111111-0000-0000-0000-000000000001',
-      cookie: 'store-region=cn-bj; install_id=222222222222222',
+      device_id: '11111111111111111',
+      iid: '22222222222222222',
+      cdid: '1111111111-0000-0000-0000-000000000001',
+      cookie: 'store-region=cn-bj; install_id=22222222222222222',
       created_at: 1700000000000
     };
     fs.writeFileSync(path.join(tmpDir, 'device.json'), JSON.stringify(existing), 'utf8');
 
     const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
     const initial = await getDevice(async () => { throw new Error('should not call network'); });
-    assert.equal(initial.device_id, '111111111111111');
-    assert.equal(getDevice.getCurrentDevice()?.device_id, '111111111111111');
+    assert.equal(initial.device_id, '11111111111111111');
+    assert.equal(getDevice.getCurrentDevice()?.device_id, '11111111111111111');
 
     let registrationCalls = 0;
     const rotateRequest = async (url, options) => {
@@ -285,7 +285,7 @@ test('rotateDevice preserves the old device when registration fails', async () =
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-rotate-fail-'));
   const previousEnv = process.env.NODE_ENV;
   try {
-    const existing = { device_id: '111111111111111', iid: '222222222222222', cdid: 'old-device', created_at: 1700000000000 };
+    const existing = { device_id: '11111111111111111', iid: '22222222222222222', cdid: 'old-device', created_at: 1700000000000 };
     const file = path.join(tmpDir, 'device.json');
     fs.writeFileSync(file, JSON.stringify(existing));
     const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
@@ -352,9 +352,9 @@ test('handles new user with no device.json by registering and persisting', async
     let calls = 0;
     const request = async () => {
       calls++;
-      const res = { device_id_str: '77777777', install_id_str: '66666666', code: 0 };
+      const res = { device_id_str: '77777777', install_id_str: '6666666666', code: 0 };
       Object.defineProperty(res, '_headers', {
-        value: { 'set-cookie': ['store-region=cn-bj; Path=/', 'install_id=66666666; Path=/'] },
+        value: { 'set-cookie': ['store-region=cn-bj; Path=/', 'install_id=6666666666; Path=/'] },
         enumerable: false
       });
       return res;
@@ -365,12 +365,99 @@ test('handles new user with no device.json by registering and persisting', async
 
     assert.equal(calls, 1);
     assert.equal(registered.device_id, '77777777');
-    assert.equal(registered.iid, '66666666');
+    assert.equal(registered.iid, '6666666666');
 
     const filePath = path.join(tmpDir, 'device.json');
     assert.ok(fs.existsSync(filePath));
     const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
     assert.equal(onDisk.device_id, '77777777');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('rotateToPooledDevice switches to the most recently successful pooled device and archives the outgoing one', async () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-pool-'));
+  try {
+    fs.writeFileSync(path.join(tmpDir, 'device.json'), JSON.stringify({
+      device_id: '1111111111', iid: '2222222222', cdid: 'aaaa',
+      cookie: 'store-region=cn-bj; store-region-src=did; install_id=2222222222',
+      created_at: 1795160000000,
+      session: { last_success_at: 1795165000000 },
+      pool: [
+        { device_id: '3333333333', iid: '4444444444', cdid: 'bbbb',
+          cookie: 'store-region=cn-bj; store-region-src=did; install_id=4444444444',
+          created_at: 1795150000000, session: { last_success_at: 1795169000000 } },
+        { device_id: '5555555555', iid: '6666666666', cdid: 'cccc',
+          cookie: 'store-region=cn-bj; store-region-src=did; install_id=6666666666',
+          created_at: 1795140000000, session: { last_success_at: 1795163000000 } },
+      ],
+    }), 'utf8');
+
+    const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
+    const before = await getDevice(async () => { throw new Error('unexpected registration'); });
+    assert.equal(before.device_id, '1111111111');
+
+    const rotated = getDevice.rotateToPooledDevice();
+    assert.equal(rotated.device_id, '3333333333', 'should pick the most recently successful candidate');
+    assert.equal(await getDevice(async () => { throw new Error('unexpected registration'); }), rotated,
+      'rotated device becomes the active identity without re-registration');
+
+    const onDisk = JSON.parse(fs.readFileSync(path.join(tmpDir, 'device.json'), 'utf8'));
+    assert.equal(onDisk.device_id, '3333333333');
+    assert.ok(onDisk.pool.some(d => d.device_id === '1111111111'), 'outgoing device archived into the pool');
+    assert.ok(!onDisk.pool.some(d => d.device_id === '3333333333'));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('rotateToPooledDevice returns null when the pool has no successful history', async () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-pool2-'));
+  try {
+    fs.writeFileSync(path.join(tmpDir, 'device.json'), JSON.stringify({
+      device_id: '1111111111', iid: '2222222222', cdid: 'aaaa',
+      cookie: 'store-region=cn-bj; store-region-src=did; install_id=2222222222',
+      created_at: 1795160000000,
+      pool: [
+        { device_id: '3333333333', iid: '4444444444', cdid: 'bbbb',
+          cookie: 'store-region=cn-bj; store-region-src=did; install_id=4444444444',
+          created_at: 1795150000000, session: { consecutive_failures: 9, last_error: 'EMPTY_RESPONSE' } },
+      ],
+    }), 'utf8');
+
+    const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
+    await getDevice(async () => { throw new Error('unexpected registration'); });
+    assert.equal(getDevice.rotateToPooledDevice(), null, 'never-succeeded device is not a valid fallback');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('manual rotation archives the outgoing device into the pool for future fallback', async () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-pool3-'));
+  try {
+    const registrationIds = ['5555555555', '77777777'];
+    const request = async () => ({ device_id_str: registrationIds.shift(), install_id_str: '88888888', code: 0 });
+    const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
+    const first = await getDevice(request);
+    assert.equal(first.device_id, '5555555555');
+
+    const second = await getDevice.rotateDevice(request);
+    assert.equal(second.device_id, '77777777');
+
+    const onDisk = JSON.parse(fs.readFileSync(path.join(tmpDir, 'device.json'), 'utf8'));
+    assert.equal(onDisk.device_id, '77777777');
+    assert.ok(onDisk.pool.some(d => d.device_id === '5555555555'), 'outgoing device kept in pool instead of being discarded');
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

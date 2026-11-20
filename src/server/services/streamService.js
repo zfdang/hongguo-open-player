@@ -311,7 +311,7 @@ class StreamService {
     const tDecrypt = Date.now();
     const shouldTranscode = this.needsTranscode(variant.codec, allowHevc);
     const decrypted = shouldTranscode
-      ? await this.transcode(buffer, key, signal)
+      ? await this.transcode(buffer, key, signal, playInfo.duration)
       : decryptMp4Buffer(buffer, key);
     logger.info('StreamService', `[Decrypt] 全集视频${shouldTranscode ? '转码' : '解密'}完成: vid=${vid}, 输入=${buffer.length} 字节, 输出=${decrypted.length} 字节, 耗时=${Date.now() - tDecrypt}ms, 总耗时=${Date.now() - t0}ms`);
     this.cache.set(this.cacheKey(vid, quality, allowHevc), { buffer: decrypted, size: decrypted.length });
@@ -563,7 +563,7 @@ class StreamService {
           const started = Date.now();
           let size = 0;
           let chunks = [];
-          for await (const chunk of service.progressiveTranscode(buffer, key, controller.signal)) {
+          for await (const chunk of service.progressiveTranscode(buffer, key, controller.signal, plan.info.duration)) {
             if (!size) logger.info('StreamService', `[ByteVC2] 首批转换数据就绪: vid=${vid}, 耗时=${Date.now() - started}ms`);
             size += chunk.length;
             if (chunks && size <= 64 * 1024 * 1024) chunks.push(chunk);

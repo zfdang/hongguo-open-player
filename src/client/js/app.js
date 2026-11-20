@@ -10,7 +10,7 @@ const app = createApp({
   setup() {
     // 视图模式与导航状态
     const viewMode = ref('catalog'); // 'catalog' | 'theater'
-    const currentTab = ref('hot-drama'); // 'hot-drama' | 'real-drama' | 'comic-drama' | 'ai-drama' | 'history' | 'favorites' | 'search'
+    const currentTab = ref('recommend'); // 'recommend' | 'hot-drama' | 'real-drama' | 'comic-drama' | 'history' | 'search'
     const searchKeyword = ref('');
     const searchHistory = ref([]);
     const showSearchHistory = ref(false);
@@ -27,31 +27,24 @@ const app = createApp({
     let catalogRequest = 0;
     let submittedKeyword = '';
 
-    // 剧星榜（演员排行榜）状态
-    const actors = ref([]);
-    const actorPage = ref(1);
-    const actorGender = ref('all'); // 'all' | 'male' | 'female'
-    const actorHasMore = ref(false);
-    const actorRankDate = ref('');
-    const loadingActors = ref(false);
-    const activeActor = ref(null);
-    const activeActorDetail = ref(null);
-    const actorWorks = ref([]);
-    const actorWorksOffset = ref(0);
-    const actorWorksTotal = ref(0);
-    const actorWorksHasMore = ref(false);
-    const loadingActorWorks = ref(false);
-    const loadingMoreWorks = ref(false);
-    const actorWorksError = ref('');
-    let currentActorRequestId = 0;
-    let actorRankingRequestId = 0;
+    // 首页推荐（红果式：页内预览自动播放，点画面播放/暂停，滚轮换一部，「观看完整视频」进剧场）
+    const recommendItem = ref(null);
+    const loadingRecommend = ref(false);
+    const recommendError = ref('');
+    const recommendVideoEl = ref(null);
+    const recommendDetail = ref(null);
+    const recommendEpIndex = ref(1);
+    const recommendStreamUrl = ref('');
+    const recommendPlaying = ref(false);
+    const recommendBuffering = ref(false);
+    let recommendRequest = 0;
+    let lastRecommendWheelAt = 0;
 
     // 剧场模式与播放器
     const videoEl = ref(null);
     const activeSeries = ref(null);
     const activeEpisodes = ref([]);
     const activeEpisodeIndex = ref(1);
-    const isFavorited = ref(false);
     const isPlaying = ref(false);
     const isBuffering = ref(false);
     const videoErrorMessage = ref('');
@@ -415,6 +408,130 @@ const app = createApp({
     const appVersion = ref('');
     const showShortcutsModal = ref(false);
 
+    // ================= 应用设置：老板键（全局隐藏 / 显示应用） =================
+    const showSettingsModal = ref(false);
+    const settingsTab = ref('shortcuts');
+    const desktopSupport = typeof window !== 'undefined' && !!window.hongguoDesktop;
+    const bossKeySaved = ref('');
+    const bossKeyPending = ref('');
+    const bossKeyRecording = ref(false);
+    const bossKeyCaptureInput = ref(null);
+    const isMacPlatform = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent || '');
+
+    function formatBossKeyDisplay(acc) {
+      if (!acc) return '';
+      return acc.replace(/CommandOrControl/g, isMacPlatform ? 'Cmd' : 'Ctrl');
+    }
+
+    async function openSettingsModal() {
+      showAppMenu.value = false;
+      showSettingsModal.value = true;
+      bossKeyPending.value = '';
+      bossKeyRecording.value = false;
+      if (desktopSupport) {
+        try {
+          const res = await window.hongguoDesktop.getSettings();
+          bossKeySaved.value = res?.bossKey || '';
+        } catch (_) {
+          bossKeySaved.value = '';
+        }
+      }
+    }
+
+    function switchSettingsTab(tab) {
+      settingsTab.value = tab;
+    }
+
+    function closeSettingsModal() {
+      showSettingsModal.value = false;
+      bossKeyRecording.value = false;
+    }
+
+    function startBossKeyRecording() {
+      if (!desktopSupport) return;
+      bossKeyRecording.value = true;
+      bossKeyPending.value = '';
+      nextTick(() => bossKeyCaptureInput.value?.focus());
+    }
+
+    function cancelBossKeyRecording() {
+      bossKeyRecording.value = false;
+    }
+
+    // 键盘事件到 Electron 快捷键字符串的映射
+    const BOSS_KEY_CODE_MAP = {
+      Space: 'Space', Enter: 'Return', NumpadEnter: 'Return', Backspace: 'Backspace', Delete: 'Delete',
+      Insert: 'Insert', Tab: 'Tab',
+      ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+      Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+      Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Semicolon: ';', Quote: "'",
+      Comma: ',', Period: '.', Slash: '/', Backslash: '\\'
+    };
+
+    function acceleratorFromEvent(e) {
+      const code = e.code || '';
+      let mainKey = '';
+      if (/^Key[A-Z]$/.test(code)) mainKey = code.slice(3);
+      else if (/^Digit[0-9]$/.test(code)) mainKey = code.slice(5);
+      else if (/^Numpad[0-9]$/.test(code)) mainKey = 'num' + code.slice(6);
+      else if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) mainKey = code;
+      else mainKey = BOSS_KEY_CODE_MAP[code] || '';
+      if (!mainKey) return '';
+      const parts = [];
+      if (e.ctrlKey) parts.push('CommandOrControl');
+      if (e.metaKey) parts.push('Super');
+      if (e.altKey) parts.push('Alt');
+      if (e.shiftKey) parts.push('Shift');
+      parts.push(mainKey);
+      return parts.join('+');
+    }
+
+    function isModifierOnlyKey(e) {
+      return ['Control', 'Shift', 'Alt', 'Meta', 'CapsLock', 'NumLock', 'ScrollLock', 'ContextMenu'].includes(e.key);
+    }
+
+    function onBossKeyCapture(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape' || e.code === 'Escape') { cancelBossKeyRecording(); return; }
+      if (isModifierOnlyKey(e)) return;
+      const acc = acceleratorFromEvent(e);
+      if (!acc) return;
+      const mainKey = acc.split('+').pop();
+      const hasModifier = acc.includes('CommandOrControl') || acc.includes('Alt') || acc.includes('Super');
+      const isFunctionKey = /^F([1-9]|1[0-9]|2[0-4])$/.test(mainKey);
+      if (!hasModifier && !isFunctionKey) {
+        notify('建议使用 Ctrl / Alt 组合键或 F 功能键，避免与日常输入冲突');
+        return;
+      }
+      bossKeyPending.value = acc;
+      bossKeyRecording.value = false;
+    }
+
+    async function applyBossKey(acc) {
+      if (!desktopSupport) { notify('老板键需要桌面客户端支持'); return; }
+      try {
+        const res = await window.hongguoDesktop.setBossKey(acc || null);
+        if (res?.success) {
+          bossKeySaved.value = res.bossKey || '';
+          bossKeyPending.value = '';
+          notify(res.bossKey ? `老板键已设置为 ${formatBossKeyDisplay(res.bossKey)}，按下即可隐藏 / 显示播放器` : '老板键已清除');
+        } else {
+          notify(res?.error || '设置失败，该快捷键可能已被其他程序占用');
+        }
+      } catch (_) {
+        notify('设置老板键失败');
+      }
+    }
+
+    function saveBossKey() {
+      if (bossKeyPending.value) applyBossKey(bossKeyPending.value);
+    }
+
+    function clearBossKey() {
+      if (bossKeySaved.value || bossKeyPending.value) applyBossKey(null);
+    }
+
     function toggleAppMenu() {
       showAppMenu.value = !showAppMenu.value;
     }
@@ -455,6 +572,566 @@ const app = createApp({
       } finally {
         isResettingDevice.value = false;
       }
+    }
+
+    // ================= 红果账号：扫码登录 / 云端记录 / 预约 / 发弹幕 =================
+    const account = ref({ logged_in: false, user: null, expired: false, notice: '', storage_encrypted: false });
+    const showAccountModal = ref(false);
+    const accountTab = ref('login'); // 'login' | 'history' | 'likes' | 'favorites' | 'reserves'
+    const accountRecords = ref({
+      history: { loading: false, items: [], notice: '', loaded: false },
+      likes: { loading: false, items: [], notice: '', loaded: false },
+      favorites: { loading: false, items: [], notice: '', loaded: false },
+      reserves: { loading: false, items: [], notice: '', loaded: false },
+    });
+    const qr = ref({ token: '', qrcode: '', expire_at: 0, countdown: 0, status: 'idle', notice: '', loading: false });
+    let qrPollTimer = null;
+    let qrCountdownTimer = null;
+    const relatedWorks = ref([]);
+    const relatedWorksLoading = ref(false);
+    const relatedWorksNotice = ref('');
+    const reservedIds = ref(new Set());
+    const pendingReserveId = ref('');
+    let pendingReserveTimer = null;
+    const reservingId = ref('');
+
+    // ================= 播放右侧互动栏：点赞 / 评论 / 收藏 =================
+    const socialState = ref({ like_count: 0, comment_count: 0, collect_count: 0, liked: false, collected: false });
+    const socialBusy = ref(false);
+    const showComments = ref(false);
+    const comments = ref({ loading: false, items: [], total: 0, has_more: false, cursor: '', notice: '', key: '' });
+    let commentsRequest = 0;
+    let socialKey = '';
+
+    function formatCount(value) {
+      const num = Number(value) || 0;
+      if (num >= 100000000) return (num / 100000000).toFixed(1).replace(/\.0$/, '') + '亿';
+      if (num >= 10000) return (num / 10000).toFixed(1).replace(/\.0$/, '') + '万';
+      return String(num);
+    }
+
+    function currentVid() {
+      return activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value)?.vid || '';
+    }
+
+    // 从账号云端记录推断当前剧是否已点赞/收藏（记录未加载时保守置 false）。
+    function deriveSocialFlags() {
+      const seriesId = String(activeSeries.value?.series_id || '');
+      if (!account.value.logged_in || !seriesId) return { liked: false, collected: false };
+      const inList = list => (list || []).some(item => String(item.series_id || item.seriesId || '') === seriesId);
+      return {
+        liked: inList(accountRecords.value.likes?.items),
+        collected: inList(accountRecords.value.favorites?.items),
+      };
+    }
+
+    async function loadSocialState(force = false) {
+      const seriesId = activeSeries.value?.series_id;
+      const vid = currentVid();
+      const key = `${seriesId}:${vid}`;
+      if (!seriesId || !vid || (!force && key === socialKey)) return;
+      socialKey = key;
+      const info = activeSeries.value?.social_info || {};
+      const episode = activeEpisodes.value.find(e => String(e.vid) === String(vid));
+      const hasEpisodeLikes = episode && Number.isFinite(Number(episode.like_count));
+      const flags = deriveSocialFlags();
+      socialState.value = {
+        // 点赞数按“本集”取，和红果 App 一致；接口不可用时才回退整剧统计
+        like_count: hasEpisodeLikes ? Number(episode.like_count) : (Number(info.like_count) || 0),
+        collect_count: Number(info.favorite_count) || 0,
+        comment_count: Number(episode?.comment_count) || socialState.value.comment_count || 0,
+        liked: episode && typeof episode.liked === 'boolean' ? episode.liked : flags.liked,
+        collected: flags.collected,
+      };
+      // 评论总数：拉首页评论顺带预热抽屉数据。
+      const request = ++commentsRequest;
+      comments.value = { loading: true, items: [], total: 0, has_more: false, cursor: '', notice: '', key };
+      try {
+        const data = await fetch(`/api/video-comments/${encodeURIComponent(seriesId)}/${encodeURIComponent(vid)}`).then(r => r.json());
+        if (request !== commentsRequest) return;
+        comments.value = {
+          loading: false,
+          items: Array.isArray(data.items) ? data.items : [],
+          total: Number(data.total) || 0,
+          has_more: Boolean(data.has_more),
+          cursor: typeof data.cursor === 'string' ? data.cursor : '',
+          notice: data.notice || (data.success ? '' : '评论加载失败'),
+          key,
+        };
+        socialState.value.comment_count = comments.value.total;
+      } catch (_) {
+        if (request === commentsRequest) {
+          comments.value = { loading: false, items: [], total: 0, has_more: false, cursor: '', notice: '评论加载失败', key };
+        }
+      }
+    }
+
+    function openComments() {
+      showComments.value = true;
+      const key = `${activeSeries.value?.series_id}:${currentVid()}`;
+      if (comments.value.key !== key || (!comments.value.items.length && !comments.value.notice)) loadSocialState(true);
+    }
+
+    function closeComments() {
+      showComments.value = false;
+      keepPlayerFocus();
+    }
+
+    async function loadMoreComments() {
+      const seriesId = activeSeries.value?.series_id;
+      const vid = currentVid();
+      if (!seriesId || !vid || comments.value.loading || !comments.value.has_more) return;
+      const request = commentsRequest;
+      comments.value.loading = true;
+      try {
+        const data = await fetch(`/api/video-comments/${encodeURIComponent(seriesId)}/${encodeURIComponent(vid)}?cursor=${encodeURIComponent(comments.value.cursor)}`).then(r => r.json());
+        if (request !== commentsRequest) return;
+        const seen = new Set(comments.value.items.map(item => item.comment_id));
+        const fresh = (Array.isArray(data.items) ? data.items : []).filter(item => !seen.has(item.comment_id));
+        comments.value.items = comments.value.items.concat(fresh);
+        comments.value.has_more = Boolean(data.has_more);
+        comments.value.cursor = typeof data.cursor === 'string' ? data.cursor : '';
+        comments.value.total = Number(data.total) || comments.value.total;
+        comments.value.notice = data.notice || '';
+      } catch (_) {
+        if (request === commentsRequest) comments.value.notice = '加载更多评论失败';
+      } finally {
+        if (request === commentsRequest) comments.value.loading = false;
+      }
+    }
+
+    // ── 评论互动：点赞 / 查看回复 ──
+    const commentLikeBusyId = ref('');
+
+    function requireAccountForComment() {
+      if (account.value.logged_in) return true;
+      notify('请先扫码登录红果账号');
+      showAccountModal.value = true;
+      accountTab.value = 'login';
+      return false;
+    }
+
+    async function toggleCommentLike(item) {
+      if (!item || !requireAccountForComment()) return;
+      const seriesId = activeSeries.value?.series_id;
+      const vid = currentVid();
+      if (!seriesId || !vid || commentLikeBusyId.value) return;
+      commentLikeBusyId.value = item.comment_id;
+      const prevLiked = !!item.liked;
+      const prevCount = Number(item.digg_count) || 0;
+      const next = !prevLiked;
+      // 乐观更新，失败回滚
+      item.liked = next;
+      item.digg_count = Math.max(0, prevCount + (next ? 1 : -1));
+      try {
+        const res = await fetch(`/api/video-comments/${encodeURIComponent(seriesId)}/${encodeURIComponent(vid)}/${encodeURIComponent(item.comment_id)}/like`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ liked: next }),
+        }).then(r => r.json());
+        if (!res.success) throw new Error(res.notice || res.error || '操作失败');
+      } catch (err) {
+        item.liked = prevLiked;
+        item.digg_count = prevCount;
+        notify('评论点赞失败：' + (err.message || '请稍后重试'));
+      } finally {
+        commentLikeBusyId.value = '';
+        keepPlayerFocus();
+      }
+    }
+
+    // 展开 / 收起某条评论的回复列表（只读，无需登录），支持游标加载更多
+    async function fetchRepliesPage(item, cursor) {
+      const seriesId = activeSeries.value?.series_id;
+      const vid = currentVid();
+      if (!seriesId || !vid) return;
+      item.replies_loading = true;
+      item.replies_open = true;
+      try {
+        const q = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+        const res = await fetch(`/api/video-comments/${encodeURIComponent(seriesId)}/${encodeURIComponent(vid)}/${encodeURIComponent(item.comment_id)}/replies${q}`).then(r => r.json());
+        if (!res.success) throw new Error(res.notice || res.error || '回复加载失败');
+        const fresh = res.items || [];
+        item.replies = Array.isArray(item.replies) ? item.replies.concat(fresh) : fresh;
+        item.replies_notice = item.replies.length ? '' : (res.notice || '暂无回复');
+        if (res.total) item.reply_count = res.total;
+        item.replies_cursor = res.cursor || '';
+        item.replies_has_more = Boolean(res.has_more);
+      } catch (err) {
+        if (!Array.isArray(item.replies) || !item.replies.length) item.replies_open = false;
+        notify('回复加载失败：' + (err.message || '请稍后重试'));
+      } finally {
+        item.replies_loading = false;
+        keepPlayerFocus();
+      }
+    }
+
+    async function toggleCommentReplies(item) {
+      if (!item) return;
+      if (item.replies_open) { item.replies_open = false; return; }
+      if (Array.isArray(item.replies) && item.replies.length) {
+        item.replies_open = true;
+        return;
+      }
+      item.replies = [];
+      item.replies_cursor = '';
+      item.replies_has_more = false;
+      await fetchRepliesPage(item, '');
+    }
+
+    async function loadMoreCommentReplies(item) {
+      if (!item || item.replies_loading || !item.replies_has_more) return;
+      await fetchRepliesPage(item, item.replies_cursor || '');
+    }
+
+    async function toggleLike() {
+      if (!account.value.logged_in) { notify('请先扫码登录红果账号'); showAccountModal.value = true; accountTab.value = 'login'; return; }
+      const seriesId = activeSeries.value?.series_id;
+      const vid = currentVid();
+      if (!seriesId || !vid || socialBusy.value) return;
+      socialBusy.value = true;
+      const next = !socialState.value.liked;
+      try {
+        const res = await fetch('/api/account/like', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ series_id: String(seriesId), vid: String(vid), action: next ? 'like' : 'unlike' }),
+        }).then(r => r.json());
+        if (res.error) throw new Error(res.error);
+        socialState.value.liked = next;
+        socialState.value.like_count = Math.max(0, socialState.value.like_count + (next ? 1 : -1));
+        const episode = activeEpisodes.value.find(e => String(e.vid) === String(vid));
+        if (episode) {
+          episode.liked = next;
+          episode.like_count = socialState.value.like_count;
+        }
+        if (accountRecords.value.likes?.loaded) loadAccountRecords('likes', true);
+      } catch (err) {
+        notify('点赞失败：' + (err.message || '请稍后重试'));
+      } finally {
+        socialBusy.value = false;
+        keepPlayerFocus();
+      }
+    }
+
+    async function toggleCollect() {
+      if (!account.value.logged_in) { notify('请先扫码登录红果账号'); showAccountModal.value = true; accountTab.value = 'login'; return; }
+      const seriesId = activeSeries.value?.series_id;
+      const vid = currentVid();
+      if (!seriesId || !vid || socialBusy.value) return;
+      socialBusy.value = true;
+      const next = !socialState.value.collected;
+      try {
+        const res = await fetch('/api/account/collect', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ series_id: String(seriesId), vid: String(vid), action: next ? 'collect' : 'uncollect' }),
+        }).then(r => r.json());
+        if (res.error) throw new Error(res.error);
+        socialState.value.collected = next;
+        socialState.value.collect_count = Math.max(0, socialState.value.collect_count + (next ? 1 : -1));
+        if (accountRecords.value.favorites?.loaded) loadAccountRecords('favorites', true);
+      } catch (err) {
+        notify('收藏失败：' + (err.message || '请稍后重试'));
+      } finally {
+        socialBusy.value = false;
+        keepPlayerFocus();
+      }
+    }
+
+    // 本地会话 Cookie 自愈：服务重启后旧 Cookie 作废会返 401，先 GET / 重建会话再重试一次。
+    async function apiFetch(url, options) {
+      let response = await fetch(url, options);
+      if (response.status === 401) {
+        try { await fetch('/', { cache: 'no-store' }); } catch (_) {}
+        response = await fetch(url, options);
+      }
+      return response;
+    }
+
+    async function loadAccountStatus() {
+      try {
+        const data = await apiFetch('/api/account/status').then(r => r.json());
+        if (data?.success) account.value = data;
+      } catch (_) {}
+    }
+
+    function stopQrPolling() {
+      if (qrPollTimer) { clearInterval(qrPollTimer); qrPollTimer = null; }
+      if (qrCountdownTimer) { clearInterval(qrCountdownTimer); qrCountdownTimer = null; }
+    }
+
+    function startQrCountdown() {
+      if (qrCountdownTimer) clearInterval(qrCountdownTimer);
+      qrCountdownTimer = setInterval(() => {
+        if (!qr.value.expire_at) return;
+        qr.value.countdown = Math.max(0, Math.ceil((qr.value.expire_at - Date.now()) / 1000));
+      }, 1000);
+    }
+
+    async function startQrLogin() {
+      stopQrPolling();
+      qr.value = { token: '', qrcode: '', expire_at: 0, countdown: 0, status: 'loading', notice: '', loading: true };
+      try {
+        const data = await fetch('/api/account/login/qrcode', { method: 'POST' }).then(r => r.json());
+        if (data?.success && data.qrcode) {
+          qr.value = {
+            token: data.token, qrcode: data.qrcode, expire_at: data.expire_at,
+            countdown: Math.max(0, Math.ceil((data.expire_at - Date.now()) / 1000)),
+            status: 'pending', notice: '', loading: false,
+          };
+          qrPollTimer = setInterval(pollQrLogin, 2000);
+          startQrCountdown();
+        } else {
+          qr.value = { ...qr.value, status: 'error', notice: data?.notice || data?.error || '获取二维码失败', loading: false };
+        }
+      } catch (_) {
+        qr.value = { ...qr.value, status: 'error', notice: '获取二维码网络异常，请重试', loading: false };
+      }
+    }
+
+    // 官网二维码有效期仅约 60 秒：到期自动换一张新码，避免用户扫到过期码。
+    async function refreshQrAuto() {
+      stopQrPolling();
+      await startQrLogin();
+      if (qr.value.status === 'pending') qr.value.notice = '二维码已自动刷新，请尽快扫码';
+    }
+
+    async function pollQrLogin() {
+      if (!qr.value.token || qr.value.status === 'confirmed') { stopQrPolling(); return; }
+      // 本地到期且尚未扫码 → 自动刷新；已扫码时交给服务端判定，避免打断手机确认。
+      if (qr.value.expire_at && Date.now() > qr.value.expire_at && qr.value.status !== 'scanned') {
+        await refreshQrAuto();
+        return;
+      }
+      try {
+        const data = await fetch('/api/account/login/poll', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: qr.value.token }),
+        }).then(r => r.json());
+        if (data?.status === 'confirmed') {
+          stopQrPolling();
+          qr.value.status = 'confirmed';
+          await loadAccountStatus();
+          notify(`登录成功${data.user?.name ? '：' + data.user.name : ''}`);
+          accountTab.value = 'history';
+          loadAccountRecords('history');
+        } else if (data?.status === 'expired') {
+          await refreshQrAuto();
+        } else if (data?.success === false) {
+          stopQrPolling();
+          qr.value.status = 'error';
+          qr.value.notice = data.notice || '登录失败，请刷新二维码';
+        } else {
+          qr.value.status = data?.scanned ? 'scanned' : 'pending';
+        }
+      } catch (_) { /* 网络抖动时继续轮询 */ }
+    }
+
+    async function logoutAccount() {
+      stopQrPolling();
+      try { await fetch('/api/account/logout', { method: 'POST' }); } catch (_) {}
+      account.value = { logged_in: false, user: null, expired: false, notice: '', storage_encrypted: account.value.storage_encrypted };
+      qr.value = { token: '', qrcode: '', expire_at: 0, countdown: 0, status: 'idle', notice: '', loading: false };
+      for (const key of Object.keys(accountRecords.value)) accountRecords.value[key] = { loading: false, items: [], notice: '', loaded: false };
+      reservedIds.value = new Set();
+      accountTab.value = 'login';
+      notify('已退出红果账号');
+    }
+
+    function openAccountModal(tab) {
+      showAppMenu.value = false;
+      showAccountModal.value = true;
+      loadAccountStatus();
+      switchAccountTab(tab || 'login');
+      nextTick(() => document.querySelector('.account-modal')?.focus?.());
+    }
+
+    function closeAccountModal() {
+      showAccountModal.value = false;
+      stopQrPolling();
+      keepPlayerFocus();
+    }
+
+    function onAccountModalKeydown(e) {
+      if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); closeAccountModal(); }
+    }
+
+    function switchAccountTab(tab) {
+      accountTab.value = tab;
+      if (tab === 'login') {
+        if (!account.value.logged_in && qr.value.status === 'idle') startQrLogin();
+        return;
+      }
+      if (!account.value.logged_in) {
+        accountTab.value = 'login';
+        if (qr.value.status === 'idle') startQrLogin();
+        return;
+      }
+      loadAccountRecords(tab);
+    }
+
+    async function loadAccountRecords(kind) {
+      const slot = accountRecords.value[kind];
+      if (!slot || slot.loading) return;
+      slot.loading = true;
+      slot.notice = '';
+      try {
+        const data = await apiFetch(`/api/account/${kind}`).then(r => r.json());
+        if (data?.success) {
+          slot.items = Array.isArray(data.items) ? data.items : [];
+          slot.notice = data.notice || '';
+          if (kind === 'reserves') {
+            reservedIds.value = new Set(slot.items.map(i => i.series_id).filter(Boolean));
+            // 当前 sub-tab 为空而另一类有数据时，自动切到有数据的一类
+            const upcomingCount = slot.items.filter(i => i.upcoming).length;
+            const onlineCount = slot.items.length - upcomingCount;
+            if (reserveSubTab.value === 'upcoming' && !upcomingCount && onlineCount) reserveSubTab.value = 'online';
+            else if (reserveSubTab.value === 'online' && !onlineCount && upcomingCount) reserveSubTab.value = 'upcoming';
+          }
+        } else {
+          slot.items = [];
+          slot.notice = data?.notice || data?.error || '加载失败';
+          if (data?.need_login) await loadAccountStatus();
+        }
+        slot.loaded = true;
+      } catch (_) {
+        slot.notice = '网络异常，加载失败';
+      } finally {
+        slot.loading = false;
+      }
+    }
+
+    // 预约记录用同一排的 sub-tab 切换"未上线/已上线"；其余标签直接展示全部。
+    const reserveSubTab = ref('upcoming'); // 'upcoming' | 'online'
+    const reserveSubTabs = computed(() => {
+      const items = accountRecords.value.reserves?.items || [];
+      return [
+        { key: 'upcoming', label: '未上线', count: items.filter(i => i.upcoming).length },
+        { key: 'online', label: '已上线', count: items.filter(i => !i.upcoming).length },
+      ];
+    });
+    const visibleRecordItems = computed(() => {
+      const kind = cloudRecordKind.value;
+      const items = accountRecords.value[kind]?.items || [];
+      if (kind !== 'reserves') return items;
+      return reserveSubTab.value === 'upcoming' ? items.filter(i => i.upcoming) : items.filter(i => !i.upcoming);
+    });
+    function switchReserveSubTab(key) { reserveSubTab.value = key; }
+
+    // 主页面云端记录标签：映射到账号记录类别，复用记录列表渲染（accountTab 同步设为该类别）。
+    const CLOUD_TAB_KIND = { 'cloud-history': 'history', 'cloud-likes': 'likes', 'cloud-favorites': 'favorites', 'cloud-reserves': 'reserves' };
+    const cloudRecordKind = computed(() => CLOUD_TAB_KIND[currentTab.value] || '');
+    const isCloudTab = computed(() => !!cloudRecordKind.value);
+    watch(() => account.value.logged_in, logged => { if (logged && cloudRecordKind.value) loadAccountRecords(cloudRecordKind.value); });
+
+    // 预约/点赞/收藏记录本身不含观看进度（只有预约记录更只有剧集信息），
+    // 回查账号云端播放记录里同一部剧的进度，用于续播。
+    async function findCloudProgress(seriesId) {
+      if (!account.value.logged_in) return null;
+      const sid = String(seriesId);
+      const pick = () => (accountRecords.value.history?.items || [])
+        .find(i => String(i.series_id) === sid && Number(i.episode_index) > 0) || null;
+      const cached = pick();
+      if (cached || accountRecords.value.history?.loaded) return cached;
+      await loadAccountRecords('history');
+      return pick();
+    }
+
+    async function playFromCloudRecord(item) {
+      if (!item?.series_id) return;
+      closeAccountModal();
+      // 记录里没有集数时（预约菜单等），按云端播放记录的上次进度续播
+      const progress = item.episode_index ? item : (await findCloudProgress(item.series_id)) || item;
+      const episodeIndex = Number(progress.episode_index) || 0;
+      const resumeSec = Math.floor((progress.position_ms || 0) / 1000);
+      await openTheater(
+        { series_id: item.series_id, series_title: item.title || '', cover: item.cover || '' },
+        { episodeIndex, resumeSec }
+      );
+    }
+
+    // ── 相关作品与预约下一季（挂在"系列全季"弹窗） ──
+    async function loadRelatedWorks() {
+      const seriesId = activeSeries.value?.series_id;
+      if (!seriesId || relatedWorksLoading.value) return;
+      relatedWorksLoading.value = true;
+      relatedWorksNotice.value = '';
+      try {
+        const data = await fetch(`/api/series/${encodeURIComponent(seriesId)}/related`).then(r => r.json());
+        if (data?.success) {
+          relatedWorks.value = data.items || [];
+          relatedWorksNotice.value = data.notice || '';
+        } else {
+          relatedWorks.value = [];
+          relatedWorksNotice.value = data?.notice || '相关作品加载失败';
+        }
+      } catch (_) {
+        relatedWorksNotice.value = '相关作品网络异常';
+      } finally {
+        relatedWorksLoading.value = false;
+      }
+    }
+
+    async function loadReservedIds() {
+      if (!account.value.logged_in) return;
+      try {
+        const data = await fetch('/api/account/reserves').then(r => r.json());
+        if (data?.success) {
+          reservedIds.value = new Set(data.items.map(i => i.series_id).filter(Boolean));
+          accountRecords.value.reserves.items = data.items;
+          accountRecords.value.reserves.notice = data.notice || '';
+          accountRecords.value.reserves.loaded = true;
+        }
+      } catch (_) {}
+    }
+
+    // 两段式确认：第一次点击变为"确认预约？"，5 秒内再点一次才真正提交（写操作）。
+    function askReserve(item) {
+      if (!account.value.logged_in) { notify('请先扫码登录红果账号'); openAccountModal('login'); return; }
+      if (reservedIds.value.has(item.series_id) || reservingId.value) return;
+      if (pendingReserveId.value === item.series_id) { confirmReserve(item); return; }
+      pendingReserveId.value = item.series_id;
+      clearTimeout(pendingReserveTimer);
+      pendingReserveTimer = setTimeout(() => { pendingReserveId.value = ''; }, 5000);
+    }
+
+    async function confirmReserve(item) {
+      clearTimeout(pendingReserveTimer);
+      pendingReserveId.value = '';
+      reservingId.value = item.series_id;
+      try {
+        const data = await fetch('/api/account/reserve', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ series_id: item.series_id }),
+        }).then(r => r.json());
+        if (data?.success) {
+          reservedIds.value = new Set([...reservedIds.value, item.series_id]);
+          notify(data.notice || '预约已提交');
+          loadAccountRecords('reserves');
+        } else {
+          notify(data?.notice || data?.error || '预约失败');
+          if (data?.need_login) openAccountModal('login');
+        }
+      } catch (_) {
+        notify('预约网络异常，请重试');
+      } finally {
+        reservingId.value = '';
+      }
+    }
+
+    function formatRecordTime(ms) {
+      if (!ms) return '';
+      const d = new Date(ms);
+      if (Number.isNaN(d.getTime())) return '';
+      const now = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const date = `${d.getFullYear() === now.getFullYear() ? '' : d.getFullYear() + '/'}${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+      return `${date} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function recordProgressText(item) {
+      if (!item.duration_ms || !item.position_ms) return '';
+      const pct = Math.min(100, Math.round(item.position_ms / item.duration_ms * 100));
+      return `看到 ${pct}%`;
     }
 
     function openAboutModal() {
@@ -673,7 +1350,7 @@ const app = createApp({
       const total = activeEpisodes.value.length;
       if (total === 0) return [];
       const groups = [];
-      const size = 30;
+      const size = 80;
       for (let i = 1; i <= total; i += size) {
         groups.push({
           start: i,
@@ -700,7 +1377,7 @@ const app = createApp({
         let url;
         if (submittedKeyword) {
           url = `/api/search?keyword=${encodeURIComponent(submittedKeyword)}&page=${currentPage.value}`;
-        } else if (tab === 'history' || tab === 'favorites') {
+        } else if (tab === 'history') {
           url = `/api/${tab}`;
         } else {
           url = `/api/catalog?category=${tab}&page=${currentPage.value}`;
@@ -726,6 +1403,158 @@ const app = createApp({
       } finally {
         if (request === catalogRequest) loadingCatalog.value = false;
       }
+    }
+
+    // 首页推荐：每次拉一部未看过的推荐剧；按钮与滚轮均触发换一个。
+    async function loadRecommend(options = {}) {
+      const request = ++recommendRequest;
+      loadingRecommend.value = true;
+      recommendError.value = '';
+      try {
+        const response = await fetch('/api/recommend/next');
+        if (!response.ok) throw new Error(`加载失败 (${response.status})`);
+        const data = await response.json();
+        if (request !== recommendRequest) return;
+        if (!data || data.success === false || !data.item) throw new Error(data?.error || '推荐加载失败');
+        recommendItem.value = data.item;
+        // 剧场内（滚轮/换一个）：换一部并直接播放；推荐页内：红果式嵌入预览播放器。
+        if (viewMode.value === 'theater') await openTheater(data.item);
+        else await startRecommendPreview(data.item, request);
+      } catch (err) {
+        if (request !== recommendRequest) return;
+        console.error('加载推荐失败:', err);
+        recommendError.value = err.message || '推荐加载失败，请重试';
+      } finally {
+        if (request === recommendRequest) loadingRecommend.value = false;
+      }
+    }
+
+    // 推荐页内嵌预览：取第一集直链自动播放；集播完自动连下一集；「观看完整视频」进剧场。
+    async function startRecommendPreview(item, request) {
+      stopRecommendBytevc2(); // 换剧前停掉旧流式会话
+      recommendStreamUrl.value = '';
+      recommendDetail.value = null;
+      recommendPlaying.value = false;
+      recommendBuffering.value = true;
+      try {
+        const detail = await fetch(`/api/series/${encodeURIComponent(item.series_id)}`).then(r => r.json());
+        if (request !== recommendRequest) return;
+        if (!detail || !Array.isArray(detail.episodes) || !detail.episodes.length) {
+          throw new Error(detail?.error || '获取该剧分集失败');
+        }
+        recommendDetail.value = detail;
+        recommendEpIndex.value = detail.episodes[0].vid_index;
+        recommendPreviewRetries = 0; // 新剧重置重试计数
+        const params = [];
+        // 与剧场一致走 ByteVC2 分片流式（mse=1）：边转码边播首帧秒开；
+        // 直链必须等「全集解密+转码」完成（实测 20~30 秒）才返回首字节。
+        if (window.Bytevc2Stream?.supported()) params.push('mse=1');
+        if (!hevcSupported.value) params.push('hevc=0');
+        recommendStreamUrl.value = `/api/stream/${detail.episodes[0].vid}${params.length ? '?' + params.join('&') : ''}`;
+      } catch (err) {
+        if (request !== recommendRequest) return;
+        console.error('推荐预览加载失败:', err);
+        recommendError.value = err.message || '推荐预览加载失败';
+        recommendBuffering.value = false;
+      }
+    }
+
+    function toggleRecommendPlay() {
+      const video = recommendVideoEl.value;
+      if (!video) return;
+      if (video.paused) video.play().catch(() => {});
+      else video.pause();
+    }
+
+    function onRecommendEnded() {
+      const detail = recommendDetail.value;
+      if (!detail) return;
+      const next = detail.episodes.find(e => e.vid_index === recommendEpIndex.value + 1);
+      if (!next) return;
+      const params = [];
+      if (window.Bytevc2Stream?.supported()) params.push('mse=1');
+      if (!hevcSupported.value) params.push('hevc=0');
+      recommendEpIndex.value = next.vid_index;
+      recommendPreviewRetries = 0; // 新集重置重试计数
+      recommendBuffering.value = true;
+      stopRecommendBytevc2(); // 旧会话绑定的是将被替换的 video 元素，必须先停
+      recommendStreamUrl.value = `/api/stream/${next.vid}${params.length ? '?' + params.join('&') : ''}`;
+    }
+
+    // 预览 ByteVC2 会话与剧场共用同一组变量（预览与剧场不会同时播放）：
+    // 进剧场 / 换剧 / 换集时必须先停旧会话，否则剧场的错误处理会误走 fallback。
+    function stopRecommendBytevc2() {
+      bytevc2Session?.stop();
+      bytevc2Session = null;
+      bytevc2Fallback = null;
+      bytevc2FallbackActive = false;
+    }
+
+    // 预览 video error：mse=1 时 error 是预期流程——探测 ByteVC2 元数据并启动
+    // 分片流式会话（首帧秒开）；其他失败（503 槽位过载等）自动重试最多 2 次。
+    let recommendPreviewRetries = 0;
+    async function onRecommendPreviewError() {
+      const video = recommendVideoEl.value;
+      const streamUrl = recommendStreamUrl.value;
+      if (!video || !streamUrl) return;
+      recommendBuffering.value = true;
+      try {
+        const probe = await fetch(streamUrl, { headers: { Range: 'bytes=0-0' } });
+        const errData = await probe.json().catch(() => null);
+        if (recommendStreamUrl.value !== streamUrl) return;
+        if (errData?.code === 'BYTEVC2_PROGRESSIVE' && window.Bytevc2Stream?.supported() && Number(errData.duration) > 0) {
+          bytevc2Fallback = () => {
+            if (video !== recommendVideoEl.value || recommendStreamUrl.value !== streamUrl) return;
+            reportClientLog('WARN', '预览 ByteVC2 分片播放失败，回退至完整转换');
+            bytevc2Session?.stop();
+            bytevc2Session = null;
+            bytevc2Fallback = null;
+            bytevc2FallbackActive = true;
+            video.src = streamUrl.replace(/([?&])mse=1(?=&|$)/, '$1mse=buffered');
+            video.load();
+            video.play().catch(() => {});
+          };
+          bytevc2Session?.stop();
+          bytevc2Session = window.Bytevc2Stream.start(
+            video,
+            streamUrl.replace(/([?&])mse=1(?=&|$)/, '$1mse=stream'),
+            Number(errData.duration),
+            bytevc2Fallback,
+          );
+          video.play().catch(() => {});
+          return;
+        }
+      } catch (_) { /* 探测失败走下方重试 */ }
+      recommendBuffering.value = false;
+      if (video && recommendStreamUrl.value && recommendPreviewRetries < 2) {
+        recommendPreviewRetries++;
+        recommendBuffering.value = true;
+        setTimeout(() => {
+          if (!recommendStreamUrl.value || !recommendVideoEl.value) return;
+          recommendVideoEl.value.load();
+          recommendVideoEl.value.play().catch(() => {});
+        }, 1200);
+        return;
+      }
+      recommendError.value = '预览播放失败，可点「换一个」换一部';
+    }
+
+    // 「观看完整视频」：进入剧场，从当前预览集开始
+    function watchRecommendFull() {
+      const epIndex = recommendEpIndex.value || 1;
+      stopRecommendBytevc2(); // 预览会话绑定的是预览 video 元素，进剧场前必须停
+      openTheater(recommendItem.value, { episodeIndex: epIndex });
+    }
+
+    // 滚轮换一个：节流避免连续滚动触发过多请求；仅在推荐视图且非加载中时生效。
+    function onRecommendWheel(event) {
+      if (currentTab.value !== 'recommend' || viewMode.value !== 'catalog') return;
+      if (loadingRecommend.value) return;
+      const now = Date.now();
+      if (now - lastRecommendWheelAt < 600) return;
+      if (Math.abs(event.deltaY) < 10) return;
+      lastRecommendWheelAt = now;
+      loadRecommend();
     }
 
     function loadSearchHistory() {
@@ -783,16 +1612,15 @@ const app = createApp({
       currentTab.value = tab;
       catalogError.value = null;
       leaveTheater();
-      closeActorDetail();
       searchKeyword.value = '';
       submittedKeyword = '';
-      if (tab === 'actors') {
-        actorPage.value = 1;
-        loadActorRankings();
+      if (CLOUD_TAB_KIND[tab]) {
+        // 云端记录标签：不走目录加载，直接拉对应账号记录（未登录时主区域显示登录门槛）。
+        const kind = CLOUD_TAB_KIND[tab];
+        if (account.value.logged_in) loadAccountRecords(kind);
+      } else if (tab === 'recommend') {
+        loadRecommend();
       } else {
-        // 切出剧星榜时立即使进行中的榜单请求失效，避免晚到数据污染
-        actorRankingRequestId++;
-        loadingActors.value = false;
         currentPage.value = 1;
         loadCatalog();
       }
@@ -804,260 +1632,7 @@ const app = createApp({
     }
 
     function goHome() {
-      switchTab('hot-drama');
-    }
-
-    // ================= 剧星榜（演员排行榜）逻辑 =================
-
-    async function loadActorRankings() {
-      const requestId = ++actorRankingRequestId;
-      const targetPage = actorPage.value;
-      const targetGender = actorGender.value;
-      loadingActors.value = true;
-      try {
-        const query = targetGender && targetGender !== 'all'
-          ? `/api/actors/ranking?page=${targetPage}&limit=20&gender=${targetGender}`
-          : `/api/actors/ranking?page=${targetPage}`;
-        const response = await fetch(query);
-        const data = await response.json();
-
-        // 校验请求新鲜度：若已被新请求取代、已切出剧星榜、当前展示页码或筛选性别已变更，丢弃旧响应
-        if (requestId !== actorRankingRequestId || currentTab.value !== 'actors' || actorPage.value !== targetPage || actorGender.value !== targetGender) {
-          return;
-        }
-
-        if (!response.ok || !data.success || !Array.isArray(data.actors)) {
-          throw new Error(data.error || `加载剧星榜失败 (${response.status})`);
-        }
-        actors.value = data.actors;
-        actorRankDate.value = data.rank_date || '';
-        actorHasMore.value = !!data.has_more;
-      } catch (err) {
-        if (requestId !== actorRankingRequestId || currentTab.value !== 'actors' || actorPage.value !== targetPage || actorGender.value !== targetGender) {
-          return;
-        }
-        console.error('加载剧星榜失败:', err);
-        notify(err.message || '剧星榜加载失败，请重试');
-        if (actorPage.value > 1) {
-          // 若跨页或会话失效失败，安全返回第 1 页并刷新
-          actorPage.value = 1;
-          await loadActorRankings();
-          return;
-        }
-        actors.value = [];
-        actorHasMore.value = false;
-      } finally {
-        if (requestId === actorRankingRequestId) {
-          loadingActors.value = false;
-        }
-      }
-    }
-
-    function switchActorGender(gender) {
-      if (actorGender.value === gender) return;
-      actorGender.value = gender;
-      actorPage.value = 1;
-      loadActorRankings();
-    }
-
-    function changeActorPage(delta) {
-      actorPage.value = Math.max(1, actorPage.value + delta);
-      loadActorRankings();
-      window.scrollTo?.({ top: 0, behavior: 'smooth' });
-    }
-
-    let lastFocusedBeforeActorModal = null;
-
-    async function openActorDetail(actor) {
-      if (!actor || !actor.actor_id) return;
-      lastFocusedBeforeActorModal = typeof document !== 'undefined' ? document.activeElement : null;
-      const requestId = ++currentActorRequestId;
-      const targetActorId = String(actor.actor_id);
-
-      activeActor.value = actor;
-      activeActorDetail.value = null;
-      actorWorks.value = [];
-      actorWorksOffset.value = 0;
-      actorWorksTotal.value = 0;
-      actorWorksHasMore.value = false;
-      loadingActorWorks.value = true;
-      loadingMoreWorks.value = false;
-      actorWorksError.value = '';
-      reportClientLog('INFO', `打开演员主页: ${actor.name} (actorId=${targetActorId})`);
-
-      nextTick(() => {
-        if (typeof document?.querySelector === 'function') {
-          const modal = document.querySelector('.actor-modal');
-          const closeBtn = document.querySelector('.modal-close-btn');
-          (closeBtn || modal)?.focus?.();
-        }
-      });
-
-      try {
-        const [detailRes, worksRes] = await Promise.allSettled([
-          fetch(`/api/actors/${encodeURIComponent(targetActorId)}`).then(async r => {
-            const json = await r.json();
-            if (!r.ok || !json.success) throw new Error(json.error || `获取演员详情失败 (${r.status})`);
-            return json;
-          }),
-          fetch(`/api/actors/${encodeURIComponent(targetActorId)}/works?count=20&offset=0`).then(async r => {
-            const json = await r.json();
-            if (!r.ok || !json.success) throw new Error(json.error || `获取演员作品失败 (${r.status})`);
-            return json;
-          })
-        ]);
-
-        // 校验请求是否仍有效且仍属于当前打开的演员
-        if (requestId !== currentActorRequestId || !activeActor.value || String(activeActor.value.actor_id) !== targetActorId) {
-          return;
-        }
-
-        if (detailRes.status === 'fulfilled' && detailRes.value?.success) {
-          activeActorDetail.value = detailRes.value.actor;
-          if (detailRes.value.actor?.avatar && activeActor.value) {
-            activeActor.value.avatar = detailRes.value.actor.avatar;
-          }
-        }
-
-        if (worksRes.status === 'fulfilled' && worksRes.value?.success) {
-          const worksData = worksRes.value;
-          actorWorks.value = worksData.works || [];
-          actorWorksTotal.value = Number(worksData.total_count) || actorWorks.value.length;
-          actorWorksOffset.value = actorWorks.value.length;
-          actorWorksHasMore.value = !!worksData.has_more && actorWorks.value.length < actorWorksTotal.value;
-          actorWorksError.value = '';
-        } else {
-          const errReason = worksRes.status === 'rejected' ? worksRes.reason?.message : (worksRes.value?.error || '作品列表加载失败');
-          actorWorksError.value = errReason || '获取演员作品失败';
-          actorWorks.value = [];
-          actorWorksHasMore.value = false;
-        }
-      } catch (err) {
-        if (requestId === currentActorRequestId) {
-          console.error('获取演员详情失败:', err);
-          actorWorksError.value = err.message || '获取演员数据失败';
-        }
-      } finally {
-        if (requestId === currentActorRequestId) {
-          loadingActorWorks.value = false;
-        }
-      }
-    }
-
-    async function loadMoreActorWorks() {
-      if (!activeActor.value || loadingMoreWorks.value || !actorWorksHasMore.value) return;
-      const requestId = currentActorRequestId;
-      const targetActorId = String(activeActor.value.actor_id);
-      const currentOffset = actorWorks.value.length;
-      loadingMoreWorks.value = true;
-      actorWorksError.value = '';
-
-      try {
-        const response = await fetch(`/api/actors/${encodeURIComponent(targetActorId)}/works?count=20&offset=${currentOffset}`);
-        const data = await response.json();
-        if (requestId !== currentActorRequestId || !activeActor.value || String(activeActor.value.actor_id) !== targetActorId) {
-          return;
-        }
-        if (response.ok && data.success && Array.isArray(data.works)) {
-          const existingIds = new Set(actorWorks.value.map(w => w.series_id));
-          const newWorks = data.works.filter(w => !existingIds.has(w.series_id));
-          actorWorks.value = [...actorWorks.value, ...newWorks];
-          actorWorksTotal.value = Number(data.total_count) || actorWorks.value.length;
-          actorWorksOffset.value = actorWorks.value.length;
-          actorWorksHasMore.value = !!data.has_more && actorWorks.value.length < actorWorksTotal.value;
-        } else {
-          throw new Error(data.error || '加载更多作品失败');
-        }
-      } catch (err) {
-        if (requestId === currentActorRequestId) {
-          console.error('加载更多作品失败:', err);
-          notify(err.message || '加载更多作品失败，请重试');
-        }
-      } finally {
-        if (requestId === currentActorRequestId) {
-          loadingMoreWorks.value = false;
-        }
-      }
-    }
-
-    async function retryLoadActorWorks() {
-      if (!activeActor.value) return;
-      const requestId = ++currentActorRequestId;
-      const targetActorId = String(activeActor.value.actor_id);
-      loadingActorWorks.value = true;
-      actorWorksError.value = '';
-
-      try {
-        const response = await fetch(`/api/actors/${encodeURIComponent(targetActorId)}/works?count=20&offset=0`);
-        const data = await response.json();
-        if (requestId !== currentActorRequestId || !activeActor.value || String(activeActor.value.actor_id) !== targetActorId) {
-          return;
-        }
-        if (response.ok && data.success && Array.isArray(data.works)) {
-          actorWorks.value = data.works;
-          actorWorksTotal.value = Number(data.total_count) || actorWorks.value.length;
-          actorWorksOffset.value = actorWorks.value.length;
-          actorWorksHasMore.value = !!data.has_more && actorWorks.value.length < actorWorksTotal.value;
-          actorWorksError.value = '';
-        } else {
-          throw new Error(data.error || '获取演员作品失败');
-        }
-      } catch (err) {
-        if (requestId === currentActorRequestId) {
-          actorWorksError.value = err.message || '获取演员作品失败，请重试';
-        }
-      } finally {
-        if (requestId === currentActorRequestId) {
-          loadingActorWorks.value = false;
-        }
-      }
-    }
-
-    function closeActorDetail() {
-      currentActorRequestId++;
-      activeActor.value = null;
-      activeActorDetail.value = null;
-      actorWorks.value = [];
-      actorWorksOffset.value = 0;
-      actorWorksTotal.value = 0;
-      actorWorksHasMore.value = false;
-      actorWorksError.value = '';
-      loadingActorWorks.value = false;
-      loadingMoreWorks.value = false;
-      if (lastFocusedBeforeActorModal && typeof lastFocusedBeforeActorModal.focus === 'function') {
-        try { lastFocusedBeforeActorModal.focus(); } catch (_) {}
-      }
-      lastFocusedBeforeActorModal = null;
-    }
-
-    function onActorModalKeydown(e) {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        e.preventDefault();
-        closeActorDetail();
-        return;
-      }
-      if (e.key === 'Tab' && typeof document?.querySelector === 'function') {
-        const modal = document.querySelector('.actor-modal');
-        if (!modal) return;
-        const focusables = Array.from(modal.querySelectorAll(
-          'button:not([disabled]), [tabindex]:not([tabindex="-1"]), a[href], input:not([disabled])'
-        )).filter(el => el.offsetParent !== null);
-        if (focusables.length === 0) return;
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        if (e.shiftKey) {
-          if (document.activeElement === first || !modal.contains(document.activeElement)) {
-            e.preventDefault();
-            last.focus();
-          }
-        } else {
-          if (document.activeElement === last || !modal.contains(document.activeElement)) {
-            e.preventDefault();
-            first.focus();
-          }
-        }
-      }
+      switchTab('recommend');
     }
 
     let lastFocusedBeforeDramaModal = null;
@@ -1082,17 +1657,6 @@ const app = createApp({
         try { lastFocusedBeforeDramaModal.focus(); } catch (_) {}
       }
       lastFocusedBeforeDramaModal = null;
-    }
-
-    function openActorFromDrama(actor) {
-      if (!actor || !actor.actor_id) return;
-      closeDramaDetail();
-      openActorDetail({
-        actor_id: actor.actor_id,
-        name: actor.name,
-        avatar: actor.avatar,
-        score: ''
-      });
     }
 
     function onDramaModalKeydown(e) {
@@ -1123,33 +1687,6 @@ const app = createApp({
           }
         }
       }
-    }
-
-    function switchToRelatedActor(rel) {
-      if (!rel || !rel.actor_id) return;
-      openActorDetail({
-        actor_id: rel.actor_id,
-        name: rel.name,
-        avatar: rel.avatar,
-        intro: rel.intro,
-        score: ''
-      });
-    }
-
-    function playActorWork(work) {
-      closeActorDetail();
-      return openTheater(work);
-    }
-
-    function getRankChangeClass(change) {
-      if (!change) return 'same';
-      if (change.type === 1) return 'up';
-      if (change.type === 2) return 'down';
-      return 'same';
-    }
-
-    function onAvatarError(e) {
-      e.target.src = '/assets/app-icon.png';
     }
 
     async function copyToClipboard(text, successMsg) {
@@ -1358,6 +1895,8 @@ const app = createApp({
 
     function openSeasonsModal() {
       showSeasonsModal.value = true;
+      loadRelatedWorks();
+      loadReservedIds();
       if (typeof nextTick === 'function') {
         nextTick(() => {
           const modal = document?.querySelector?.('.seasons-modal');
@@ -1414,6 +1953,7 @@ const app = createApp({
     function leaveTheater() {
       theaterRequest++;
       saveProgressNow();
+      reportCloudProgress(true);
       if (videoEl.value && typeof videoEl.value.pause === 'function') videoEl.value.pause();
       resetPlayback();
       videoResolution.value = { width: 0, height: 0 };
@@ -1421,12 +1961,20 @@ const app = createApp({
       clearTimeout(controlsHideTimer);
       showDramaDetailModal.value = false;
       showSeasonsModal.value = false;
+      relatedWorks.value = [];
+      relatedWorksNotice.value = '';
       sidebarTab.value = 'episodes';
+      showComments.value = false;
+      socialKey = '';
+      commentsRequest++;
+      socialState.value = { like_count: 0, comment_count: 0, collect_count: 0, liked: false, collected: false };
+      comments.value = { loading: false, items: [], total: 0, has_more: false, cursor: '', notice: '', key: '' };
       viewMode.value = 'catalog';
       if (navigator.mediaSession) { navigator.mediaSession.playbackState = 'none'; navigator.mediaSession.metadata = null; }
     }
 
-    async function openTheater(drama) {
+    // options.episodeIndex / options.resumeSec：外部记录（如云端播放记录）指定的续播位置
+    async function openTheater(drama, options = {}) {
       const request = ++theaterRequest;
       videoErrorMessage.value = '';
       isBuffering.value = true;
@@ -1453,16 +2001,16 @@ const app = createApp({
         const watched = detail.saved_progress?.watched_indexes || [detail.saved_progress?.episode_index];
         watchedMap.value.set(detail.series_id, new Set(watched.filter(index => Number.isInteger(index) && index > 0)));
         activeEpisodes.value = detail.episodes;
-        isFavorited.value = !!detail.is_favorite;
 
         // 计算初始选集分组
         const groups = episodeGroups.value;
-        currentGroup.value = groups[0] || { start: 1, end: 30 };
+        currentGroup.value = groups[0] || { start: 1, end: 80 };
 
-        // 默认恢复上次观看进度或第一集
-        let targetIndex = detail.episodes[0].vid_index;
-        let resumeSec = 0;
-        if (detail.saved_progress) {
+        // 默认恢复上次观看进度或第一集；外部指定了目标集时以外部为准
+        const optionIndex = Number(options.episodeIndex) || 0;
+        let targetIndex = optionIndex || detail.episodes[0].vid_index;
+        let resumeSec = optionIndex ? Number(options.resumeSec) || 0 : 0;
+        if (!optionIndex && detail.saved_progress) {
           targetIndex = Number(detail.saved_progress.episode_index) || 1;
           resumeSec = Number(detail.saved_progress.position_sec) || 0;
         }
@@ -1473,6 +2021,7 @@ const app = createApp({
         }
         activeEpisodeIndex.value = targetIndex;
         loadDanmaku();
+        loadSocialState(true);
         // 定位所属分组
         const matchedGroup = groups.find(g => targetIndex >= g.start && targetIndex <= g.end);
         if (matchedGroup) currentGroup.value = matchedGroup;
@@ -1498,7 +2047,7 @@ const app = createApp({
 
     function closeTheater() {
       leaveTheater();
-      if (['history', 'favorites'].includes(currentTab.value)) loadCatalog();
+      if (currentTab.value === 'history') loadCatalog();
       nextTick(() => window.scrollTo?.(0, catalogScrollTop));
     }
 
@@ -1511,6 +2060,7 @@ const app = createApp({
       isBuffering.value = true;
       activeEpisodeIndex.value = ep.vid_index;
       loadDanmaku();
+      loadSocialState(true);
       currentTime.value = 0;
 
 
@@ -1546,6 +2096,29 @@ const app = createApp({
         const group = episodeGroups.value.find(g => next.vid_index >= g.start && next.vid_index <= g.end);
         if (group) currentGroup.value = group;
         switchEpisode(next);
+      }
+    }
+
+    // 鼠标滚轮切集：上滚上一集 / 下滚下一集（仅在视频核心区生效，不干扰侧栏列表滚动）
+    let lastWheelSwitchAt = 0;
+    function handlePlayerWheel(e) {
+      if (viewMode.value !== 'theater') return;
+      const delta = e.deltaY;
+      if (Math.abs(delta) < 10) return;
+      const now = Date.now();
+      // 推荐模式：滚轮不切集，而是换一部推荐并直接播放（仿 App 上下滑切换）。
+      if (currentTab.value === 'recommend') {
+        if (now - lastWheelSwitchAt < 600 || loadingRecommend.value) return;
+        lastWheelSwitchAt = now;
+        loadRecommend({ theater: true });
+        return;
+      }
+      if (now - lastWheelSwitchAt < 400) return; // 触控板惯性滚动防连跳
+      const before = activeEpisodeIndex.value;
+      if (delta < 0) playPrevEpisode(); else playNextEpisode();
+      if (activeEpisodeIndex.value !== before) {
+        lastWheelSwitchAt = now;
+        showOSD(`第 ${activeEpisodeIndex.value} 集`);
       }
     }
 
@@ -1630,29 +2203,6 @@ const app = createApp({
       keepPlayerFocus();
     }
 
-    async function toggleFavCurrent() {
-      if (!activeSeries.value) return;
-      try {
-        const res = await fetch('/api/favorites/toggle', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            series_id: activeSeries.value.series_id,
-            series_title: activeSeries.value.series_title,
-            cover: activeSeries.value.cover,
-            episode_count: activeSeries.value.total
-          })
-        }).then(r => r.json());
-        if (res.error) throw new Error(res.error);
-        isFavorited.value = !!res.is_favorite;
-      } catch (err) {
-        console.error('收藏切换失败:', err);
-        notify('收藏保存失败，请稍后重试');
-      } finally {
-        keepPlayerFocus();
-      }
-    }
-
     // ================= 播放器事件回调 =================
 
     function onPlay(event) {
@@ -1704,6 +2254,7 @@ const app = createApp({
       danmakuEngine?.pause?.();
       if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused';
       saveProgressNow();
+      reportCloudProgress(true);
       setControlsHidden(false);
       clearTimeout(controlsHideTimer);
     }
@@ -1722,7 +2273,7 @@ const app = createApp({
         videoEl.value.volume = Number(volume.value);
         videoEl.value.muted = isMuted.value;
         if (navigator.mediaSession && typeof MediaMetadata !== 'undefined') {
-          navigator.mediaSession.metadata = new MediaMetadata({ title: `${activeSeries.value?.series_title || ''} · 第 ${activeEpisodeIndex.value} 集`, artist: '红果开源播放器' });
+          navigator.mediaSession.metadata = new MediaMetadata({ title: `${activeSeries.value?.series_title || ''} · 第 ${activeEpisodeIndex.value} 集`, artist: '红果播放器' });
         }
         reportClientLog('INFO', `视频元数据解析就绪: 《${activeSeries.value?.series_title || ''}》 第 ${activeEpisodeIndex.value} 集, 时长=${formatTime(duration.value)}, 画面=${videoEl.value.videoWidth || 0}x${videoEl.value.videoHeight || 0}`);
         videoEl.value.playbackRate = parseFloat(playbackRate.value);
@@ -1741,6 +2292,7 @@ const app = createApp({
     function onTimeUpdate(event) {
       if (isScrubbing.value) return;
       if (event && event.target !== videoEl.value) return;
+      if (autoStreamRetryCount || cooldownRetryCount) { autoStreamRetryCount = 0; cooldownRetryCount = 0; } // 播放恢复正常，清零自动重试计数
       if (videoEl.value) {
         currentTime.value = videoEl.value.currentTime || 0;
         const rate = Number(videoEl.value.playbackRate) || 1;
@@ -1825,11 +2377,16 @@ const app = createApp({
                   bytevc2Session = window.Bytevc2Stream.start(video, progressiveUrl, Number(errData.duration), bytevc2Fallback);
                 } catch (_) { bytevc2Fallback(); return; }
                 video.play().catch(() => {});
+              } else if (errData?.code === 'RATE_LIMIT_COOLDOWN') {
+                videoErrorMessage.value = '上游风控冷却中；稍后自动重试，请勿频繁操作';
+                tryCooldownRetry();
               } else if (errData?.code === 'EMPTY_RESPONSE' || /返回空响应/.test(errData?.error || '')) {
-                videoErrorMessage.value = '上游接口返回空响应，可能是当前设备鉴权受限；请点击右上角菜单中的“生成新的设备ID”后重试';
+                videoErrorMessage.value = '上游接口返回空响应（设备鉴权受限）；正在自动生成新设备ID并重试…';
+                autoResetDeviceAndRetry(errData?.code || 'EMPTY_RESPONSE');
               } else if (errData?.code === 'DEVICE_REGISTRATION_FAILED' || /匿名播放设备注册失败|ERR_NETWORK/i.test(errData?.error || '')) {
-                videoErrorMessage.value = '播放设备注册受阻（ERR_NETWORK）；请检查网络连接、代理软件（Clash/去广告规则）或 DNS 设置';
-                reportClientLog('WARN', '播放器源探测提示: 设备注册受阻（ERR_NETWORK），已展示网络/代理排查指引');
+                videoErrorMessage.value = '播放设备注册受阻（ERR_NETWORK）；正在尝试生成新设备ID…';
+                autoResetDeviceAndRetry(errData?.code || 'DEVICE_REGISTRATION_FAILED');
+                reportClientLog('WARN', '播放器源探测提示: 设备注册受阻（ERR_NETWORK），已尝试自动更换设备ID');
               } else if (errData?.code === 'SECURITY_BLOCKED') {
                 videoErrorMessage.value = '视频源地址未通过安全检查；请切换分集重试';
               } else if (errData?.code === 'UNSUPPORTED_BYTEVC2') {
@@ -1840,6 +2397,10 @@ const app = createApp({
                 videoErrorMessage.value = errData.error || 'ByteVC2 视频转换失败，请重试';
               } else if (errData?.error) {
                 videoErrorMessage.value = `${errData.error}；请检查网络或重试切换分集`;
+                tryAutoStreamRetry(); // 转码失败等暂时性错误：自动重试
+              } else if (activeEpisodeIndex.value === currentEpIndex && currentStreamUrl.value === streamUrl) {
+                // 探测返回 503（流槽位过载）等非 JSON 错误体：暂时性失败，自动重试本集
+                tryAutoStreamRetry();
               }
             } else if (probeRes.ok && activeEpisodeIndex.value === currentEpIndex) {
               reportClientLog('ERROR', `播放器解码/渲染报错: code=${code}, message=${message}`);
@@ -1870,6 +2431,75 @@ const app = createApp({
       }
     }
 
+    // 暂时性播放失败（503 流槽位过载 / 上游转码抖动等）自动重试本集，最多 2 次；
+    // 播放恢复（时间更新走动）后计数清零。确定性失败（编码不支持等）不重试。
+    let autoStreamRetryCount = 0;
+    function tryAutoStreamRetry() {
+      if (autoStreamRetryCount >= 2) return;
+      autoStreamRetryCount++;
+      isBuffering.value = true;
+      showOSD(`播放失败，正在自动重试（${autoStreamRetryCount}/2）…`);
+      setTimeout(() => {
+        if (viewMode.value === 'theater') retryCurrentEpisode();
+      }, 1500);
+    }
+
+    // 服务端风控熔断（RATE_LIMIT_COOLDOWN，冷却 60 秒）：10 秒长退避重试，最多 8 次
+    // （覆盖超过冷却窗口）；不消耗常规重试计数，播放恢复（时间更新走动）后一并清零。
+    let cooldownRetryCount = 0;
+    let lastCooldownAt = 0;
+    function tryCooldownRetry() {
+      lastCooldownAt = Date.now();
+      if (cooldownRetryCount >= 8) {
+        isBuffering.value = false;
+        videoErrorMessage.value = '上游风控冷却超时；请点击“重试本集”或稍后再试';
+        return;
+      }
+      cooldownRetryCount++;
+      isBuffering.value = true;
+      showOSD(`风控冷却中，10 秒后自动重试（${cooldownRetryCount}/8）…`);
+      setTimeout(() => {
+        if (viewMode.value === 'theater') retryCurrentEpisode();
+      }, 10000);
+    }
+
+    // 播放异常自动换设备：上游对当前设备鉴权受限（空响应/设备注册失败）时，
+    // 自动生成新设备ID并重试本集。按「剧集:集数」防循环——同一集只自动重置一次，
+    // 仍失败则提示用户手动处理（网络/代理问题自动重置也救不了）。
+    // 风控冷却期及其后 10 分钟内禁用：新设备是零信任身份，上游对新设备取流更严，
+    // 且换设备会绕过熔断冷却继续风暴；应走冷却长退避等待上游放行。
+    let autoDeviceResetBusy = false;
+    let autoDeviceResetKey = '';
+    async function autoResetDeviceAndRetry(reason) {
+      if (Date.now() - lastCooldownAt < 10 * 60 * 1000) {
+        reportClientLog('WARN', `冷却期内抑制自动换设备 (${reason})，改走冷却退避`);
+        tryCooldownRetry();
+        return;
+      }
+      const key = `${activeSeries.value?.series_id || ''}:${activeEpisodeIndex.value}`;
+      if (autoDeviceResetBusy || autoDeviceResetKey === key) return;
+      autoDeviceResetBusy = true;
+      autoDeviceResetKey = key;
+      try {
+        showOSD('检测到设备鉴权受限，正在生成新设备ID…');
+        const response = await fetch('/api/device/reset', { method: 'POST' });
+        const data = await response.json().catch(() => null);
+        if (data?.success && data?.device?.device_id) {
+          currentDeviceId.value = data.device.device_id;
+          reportClientLog('WARN', `播放异常自动生成新设备ID (${reason}): ${data.device.device_id}`);
+          showOSD(`已生成新设备ID，正在重试第 ${activeEpisodeIndex.value} 集…`);
+          retryCurrentEpisode();
+        } else {
+          videoErrorMessage.value = data?.error || '自动生成新设备ID失败；请检查网络/代理设置，或点击右上角菜单中的“生成新的设备ID”后重试';
+        }
+      } catch (err) {
+        console.error('自动生成新设备ID失败:', err);
+        videoErrorMessage.value = '自动生成新设备ID失败；请检查网络/代理设置，或点击右上角菜单中的“生成新的设备ID”后重试';
+      } finally {
+        autoDeviceResetBusy = false;
+      }
+    }
+
     // ================= 辅助工具方法 =================
 
     function formatTime(seconds) {
@@ -1894,6 +2524,30 @@ const app = createApp({
       return set ? set.has(index) : false;
     }
 
+    // 播放进度同步上报红果账号（官方 App 播放记录可见）。节流 20s，离开剧场时强制。
+    let lastCloudProgressAt = 0;
+    async function reportCloudProgress(force = false) {
+      if (!account.value.logged_in) return;
+      if (!activeSeries.value || !progressReady || viewMode.value !== 'theater') return;
+      const now = Date.now();
+      if (!force && now - lastCloudProgressAt < 20000) return;
+      lastCloudProgressAt = now;
+      const curEp = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value);
+      try {
+        await fetch('/api/account/progress', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            series_id: activeSeries.value.series_id,
+            vid: curEp?.vid || '',
+            episode_index: activeEpisodeIndex.value,
+            position_sec: currentTime.value,
+            duration_sec: duration.value,
+            episode_count: activeSeries.value.total,
+          }),
+        });
+      } catch (_) { /* 云端上报失败不影响本地进度 */ }
+    }
+
     function saveProgressNow() {
       if (!activeSeries.value || !progressReady || viewMode.value !== 'theater') return;
       const curEp = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value);
@@ -1912,6 +2566,7 @@ const app = createApp({
           watched_indexes: [...(watchedMap.value.get(activeSeries.value.series_id) || [])]
         })
       }).then(response => { if (!response.ok) throw new Error('保存失败'); }).catch(() => notify('观看进度保存失败，请检查数据目录是否可写'));
+      reportCloudProgress();
     }
 
     function onImageError(e) {
@@ -1953,9 +2608,19 @@ const app = createApp({
           closeShortcutsModal();
           return;
         }
+        if (showSettingsModal.value) {
+          e.preventDefault();
+          closeSettingsModal();
+          return;
+        }
         if (showAboutModal.value) {
           e.preventDefault();
           closeAboutModal();
+          return;
+        }
+        if (showAccountModal.value) {
+          e.preventDefault();
+          closeAccountModal();
           return;
         }
         if (showDramaDetailModal.value) {
@@ -1966,11 +2631,6 @@ const app = createApp({
         if (showSeasonsModal.value) {
           e.preventDefault();
           closeSeasonsModal();
-          return;
-        }
-        if (activeActor.value) {
-          e.preventDefault();
-          closeActorDetail();
           return;
         }
       }
@@ -2058,7 +2718,8 @@ const app = createApp({
       fetchDeviceInfo();
       loadPreferences();
       loadSearchHistory();
-      loadCatalog();
+      if (currentTab.value === 'recommend') loadRecommend(); else loadCatalog();
+      loadAccountStatus();
       window.addEventListener('keydown', handleKeyDown);
       window.addEventListener('click', handleGlobalClick);
       window.addEventListener('mousemove', handleWindowMouseMove);
@@ -2097,6 +2758,8 @@ const app = createApp({
         try { navigator.mediaSession.setActionHandler(name, null); } catch (_) {}
       }
       if (progressTimer) clearInterval(progressTimer);
+      stopQrPolling();
+      clearTimeout(pendingReserveTimer);
     });
 
     return {
@@ -2112,11 +2775,23 @@ const app = createApp({
       currentPage,
       loadingCatalog,
       hasMore,
+      recommendItem,
+      loadingRecommend,
+      recommendError,
+      recommendVideoEl,
+      recommendDetail,
+      recommendEpIndex,
+      recommendStreamUrl,
+      recommendPlaying,
+      recommendBuffering,
+      toggleRecommendPlay,
+      onRecommendEnded,
+      onRecommendPreviewError,
+      watchRecommendFull,
       videoEl,
       activeSeries,
       activeEpisodes,
       activeEpisodeIndex,
-      isFavorited,
       isPlaying,
       isBuffering,
       videoErrorMessage,
@@ -2133,6 +2808,8 @@ const app = createApp({
       episodeGroups,
       currentGroupEpisodes,
       loadCatalog,
+      loadRecommend,
+      onRecommendWheel,
       handleSearch,
       quickSearch,
       switchTab,
@@ -2143,6 +2820,7 @@ const app = createApp({
       switchEpisode,
       playPrevEpisode,
       playNextEpisode,
+      handlePlayerWheel,
       togglePlay,
       seekByClick,
       changeSpeed,
@@ -2152,7 +2830,6 @@ const app = createApp({
       fitMode,
       toggleFitMode,
       handleVideoClick,
-      toggleFavCurrent,
       onPlay,
       onPause,
       onCanPlay,
@@ -2165,38 +2842,10 @@ const app = createApp({
       isEpisodeWatched,
       onImageError,
       keepPlayerFocus,
-      actors,
-      actorPage,
-      actorGender,
-      actorHasMore,
-      actorRankDate,
-      loadingActors,
-      activeActor,
-      activeActorDetail,
-      actorWorks,
-      actorWorksOffset,
-      actorWorksTotal,
-      actorWorksHasMore,
-      loadingActorWorks,
-      loadingMoreWorks,
-      actorWorksError,
-      loadActorRankings,
-      changeActorPage,
-      switchActorGender,
-      openActorDetail,
-      closeActorDetail,
-      loadMoreActorWorks,
-      retryLoadActorWorks,
-      switchToRelatedActor,
-      playActorWork,
-      getRankChangeClass,
-      onAvatarError,
       catalogError,
-      onActorModalKeydown,
       showDramaDetailModal,
       openDramaDetail,
       closeDramaDetail,
-      openActorFromDrama,
       onDramaModalKeydown,
       relatedSeasons,
       isCheckingSeasons,
@@ -2222,12 +2871,30 @@ const app = createApp({
       closeAboutModal,
       openShortcutsModal,
       closeShortcutsModal,
+      showSettingsModal, settingsTab, desktopSupport,
+      bossKeySaved, bossKeyPending, bossKeyRecording, bossKeyCaptureInput,
+      formatBossKeyDisplay,
+      openSettingsModal, closeSettingsModal, switchSettingsTab,
+      startBossKeyRecording, cancelBossKeyRecording, onBossKeyCapture,
+      saveBossKey, clearBossKey,
       openLogDir,
       openLogFile,
       openGithubRepo,
       resetDevice,
       currentDeviceId,
-      isResettingDevice
+      isResettingDevice,
+      account, showAccountModal, accountTab, accountRecords, qr,
+      reserveSubTab, reserveSubTabs, visibleRecordItems, switchReserveSubTab,
+      cloudRecordKind, isCloudTab,
+      openAccountModal, closeAccountModal, onAccountModalKeydown, switchAccountTab,
+      startQrLogin, logoutAccount, loadAccountRecords, playFromCloudRecord,
+      relatedWorks, relatedWorksLoading, relatedWorksNotice, loadRelatedWorks,
+      reservedIds, pendingReserveId, reservingId, askReserve,
+      socialState, socialBusy, showComments, comments,
+      formatCount, openComments, closeComments, loadMoreComments,
+      commentLikeBusyId, toggleCommentLike, toggleCommentReplies, loadMoreCommentReplies,
+      toggleLike, toggleCollect,
+      formatRecordTime, recordProgressText
     };
   }
 });
