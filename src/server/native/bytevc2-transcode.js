@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { assertUnencryptedMp4 } = require('./hongguo');
+const logger = require('../services/logger');
 
 let cachedHevcDecoderBinary;
 let cachedHevcDecoderSupport = false;
@@ -46,6 +47,7 @@ async function transcodeBytevc2(buffer, key, signal, durationSec) {
   if (!Buffer.isBuffer(key) || ![0, 16].includes(key.length)) throw new Error('ByteVC2 片源密钥无效');
   if (!key.length) assertUnencryptedMp4(buffer);
   const limit = transcodeLimitBytes(durationSec);
+  logger.info('ByteVC2', `开始完整转码: 输入=${buffer.length}字节, 时长=${Number.isFinite(durationSec) ? durationSec : '?'}s, 密钥=${key.length ? '有' : '无'}, 输出上限=${Math.round(limit / 1024 / 1024)}MB, ffmpeg=${binaryPath()}`);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hongguo-bvc2-'));
   const input = path.join(dir, 'input.mp4');
   const output = path.join(dir, 'output.mp4');
@@ -81,11 +83,20 @@ async function transcodeBytevc2(buffer, key, signal, durationSec) {
       }, 500);
       sizeCheck.unref?.();
       child.stderr.on('data', data => { if (errors.length < 4096) errors += data.toString().slice(0, 4096 - errors.length); });
-      child.on('error', error => done(Object.assign(new Error('ByteVC2 转码器不可用，请重新安装播放器'), { code: 'BYTEVC2_TRANSCODER_UNAVAILABLE', cause: error })));
+      child.on('error', error => {
+        logger.error('ByteVC2', `转码器不可用（无法启动 ffmpeg）: ${binaryPath()}`, { code: 'BYTEVC2_TRANSCODER_UNAVAILABLE', error: error.message });
+        done(Object.assign(new Error('ByteVC2 转码器不可用，请重新安装播放器'), { code: 'BYTEVC2_TRANSCODER_UNAVAILABLE', cause: error }));
+      });
       child.on('close', code => {
         if (signal?.aborted) return done(signal.reason || new Error('播放已取消'));
-        if (stoppedReason) return done(Object.assign(new Error(stoppedReason), { code: 'BYTEVC2_TRANSCODE_FAILED' }));
-        if (code !== 0) return done(Object.assign(new Error('ByteVC2 视频转换失败'), { code: 'BYTEVC2_TRANSCODE_FAILED', detail: errors }));
+        if (stoppedReason) {
+          logger.error('ByteVC2', `完整转码中止: ${stoppedReason}`, { code: 'BYTEVC2_TRANSCODE_FAILED' });
+          return done(Object.assign(new Error(stoppedReason), { code: 'BYTEVC2_TRANSCODE_FAILED' }));
+        }
+        if (code !== 0) {
+          logger.error('ByteVC2', `完整转码失败: ffmpeg 退出码=${code}`, { code: 'BYTEVC2_TRANSCODE_FAILED', ffmpeg_stderr: errors.slice(0, 2000) });
+          return done(Object.assign(new Error('ByteVC2 视频转换失败'), { code: 'BYTEVC2_TRANSCODE_FAILED', detail: errors }));
+        }
         done();
       });
       signal?.addEventListener('abort', abort, { once: true });
@@ -103,6 +114,7 @@ async function* streamBytevc2(buffer, key, signal, durationSec) {
   if (!Buffer.isBuffer(key) || ![0, 16].includes(key.length)) throw new Error('ByteVC2 片源密钥无效');
   if (!key.length) assertUnencryptedMp4(buffer);
   const limit = transcodeLimitBytes(durationSec);
+  logger.info('ByteVC2', `开始渐进转码(MSE): 输入=${buffer.length}字节, 时长=${Number.isFinite(durationSec) ? durationSec : '?'}s, 密钥=${key.length ? '有' : '无'}, ffmpeg=${binaryPath()}`);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hongguo-bvc2-stream-'));
   let child;
   let completion;
@@ -136,7 +148,10 @@ async function* streamBytevc2(buffer, key, signal, durationSec) {
     }
     const result = await completion;
     signal?.throwIfAborted();
-    if (result.error || result.code !== 0 || !size) throw Object.assign(new Error('ByteVC2 视频转换失败'), { code: 'BYTEVC2_TRANSCODE_FAILED', detail: errors });
+    if (result.error || result.code !== 0 || !size) {
+      logger.error('ByteVC2', `渐进转码失败: 退出码=${result.code ?? '?'}, 输出=${size}字节, 启动错误=${result.error?.message || '无'}`, { code: 'BYTEVC2_TRANSCODE_FAILED', ffmpeg_stderr: errors.slice(0, 2000) });
+      throw Object.assign(new Error('ByteVC2 视频转换失败'), { code: 'BYTEVC2_TRANSCODE_FAILED', detail: errors });
+    }
   } finally {
     clearTimeout(timer);
     if (abort) signal?.removeEventListener('abort', abort);
