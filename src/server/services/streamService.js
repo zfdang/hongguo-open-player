@@ -313,7 +313,7 @@ class StreamService {
     const decrypted = shouldTranscode
       ? await this.transcode(buffer, key, signal, playInfo.duration)
       : decryptMp4Buffer(buffer, key);
-    logger.info('StreamService', `[Decrypt] 全集视频${shouldTranscode ? '转码' : '解密'}完成: vid=${vid}, 输入=${buffer.length} 字节, 输出=${decrypted.length} 字节, 耗时=${Date.now() - tDecrypt}ms, 总耗时=${Date.now() - t0}ms`);
+    logger.info('StreamService', `[Decrypt] 全集视频${shouldTranscode ? '转码' : '解密'}完成: vid=${vid}, codec=${variant.codec}, 输入=${buffer.length} 字节, 输出=${decrypted.length} 字节, 耗时=${Date.now() - tDecrypt}ms, 总耗时=${Date.now() - t0}ms`);
     this.cache.set(this.cacheKey(vid, quality, allowHevc), { buffer: decrypted, size: decrypted.length });
     this.pruneCache();
     return decrypted;
@@ -400,9 +400,9 @@ class StreamService {
       nextVids,
     });
     if (this.needsTranscode(info.codec, allowHevc)) {
-      return progressive && Number.isFinite(info.duration) && info.duration > 0 && info.duration <= 86400
-        ? { bytevc2: true, info }
-        : null;
+      const progressiveOk = progressive && Number.isFinite(info.duration) && info.duration > 0 && info.duration <= 86400;
+      logger.info('StreamService', `片源需转码: vid=${vid}, codec=${info.codec}, allowHevc=${allowHevc}, 模式=${progressiveOk ? '渐进转码(MSE)' : '完整缓冲转码'}`);
+      return progressiveOk ? { bytevc2: true, info } : null;
     }
     let lastError;
     let hasRangeUnsupported = false;
@@ -615,10 +615,10 @@ class StreamService {
         error.message === 'Playback disconnected';
 
       if (!isClientAbort) {
-        logger.error('StreamService', `流媒体播放异常 vid=${vid}: ${error.message}`);
+        logger.error('StreamService', `流媒体播放异常 vid=${vid}: ${error.message}`, { code: error.code || 'STREAM_ERROR', status: error.status || 500, quality, allowHevc, mse: req.query?.mse || '' });
         if (!res.destroyed) {
           if (!res.headersSent) {
-            res.writeHead(500, {
+            res.writeHead(error.status >= 400 && error.status < 600 ? error.status : 500, {
               'Content-Type': 'application/json',
               'X-Stream-Error-Code': error.code || 'STREAM_ERROR',
             });

@@ -630,6 +630,7 @@ async function parseEntryPlayInfo(vid, entry, requestedQuality, allowLowerQualit
         const aPixels = Math.min(a.width, a.height), bPixels = Math.min(b.width, b.height);
         return (aMeets ? aPixels - bPixels : bPixels - aPixels) || a.codecRank - b.codecRank;
     });
+    logger.info('AppSource', `片源解析: vid=${vid}, 候选=${candidates.length}, 编码=[${[...new Set(candidates.map(c => c.codec || '?'))].join(',') || '无'}], 兼容=${rows.length}, allowHevc=${allowHevc}, allowBytevc2=${allowBytevc2}, allowHevcTranscode=${allowHevcTranscode}`);
     if (!allowBytevc2 && !rows.length && candidates.some(row => BYTEVC2_CODECS.includes(row.codec))
         && !candidates.some(row => row.codecRank < 2)) {
         throw Object.assign(new Error('本集使用 ByteVC2 编码，当前播放器暂不支持'), { code: 'UNSUPPORTED_BYTEVC2' });
@@ -676,7 +677,13 @@ async function parseEntryPlayInfo(vid, entry, requestedQuality, allowLowerQualit
             }
         } catch (error) { lastError = error; }
     }
-    if (variants.length) return { ...variants[0], variants, duration: Number(model.video_duration || info.video_duration) || 0 };
+    if (variants.length) {
+        const chosen = variants[0];
+        let cdnHost = ''; try { cdnHost = new URL(chosen.url).hostname; } catch (_) {}
+        const duration = Number(model.video_duration || info.video_duration) || 0;
+        logger.info('AppSource', `取址成功: vid=${vid}, codec=${chosen.codec}, quality=${chosen.quality || '?'}, 变体数=${variants.length}, 时长=${duration}s, CDN=${cdnHost}`);
+        return { ...chosen, variants, duration };
+    }
     throw lastError?.code === 'SECURITY_BLOCKED' ? lastError
         : Object.assign(new Error('本集片源地址或密钥无法解析'), { code: 'INVALID_RESPONSE' });
 }
@@ -756,6 +763,7 @@ async function runPlaybackSteps(steps, vid, payload, device, execRequestJson, de
     const devKey = deviceKey(device);
     let lastError = null;
     let allEmpty = true;
+    let attempted = 0;
     let skipRemainingMulti = false;
     let loggedMultiRetry = false;
     let loggedShortplay = false;
@@ -765,6 +773,7 @@ async function runPlaybackSteps(steps, vid, payload, device, execRequestJson, de
         if (step.kind === 'multi' && skipRemainingMulti) continue;
         signal.throwIfAborted();
         if (deadline - Date.now() <= 0) break;
+        attempted++;
 
         try {
             if (step.kind === 'multi') {
@@ -824,6 +833,7 @@ async function runPlaybackSteps(steps, vid, payload, device, execRequestJson, de
             }
         }
     }
+    logger.warn('AppSource', `取址通道全部失败: vid=${vid}, 尝试=${attempted}/${steps.length}, 全空响应=${allEmpty}, 末次错误=${lastError?.code || '无'}, device_key=${devKey}`);
     return { response: null, lastError, allEmpty };
 }
 
@@ -873,9 +883,12 @@ async function resolveUpstreamEntry(vid, batch, refresh, callerSignal) {
         const device = await getPlaybackDevice(execRequestJson, internalSignal);
         const devKey = deviceKey(device);
         if (inPlaybackCooldown(devKey)) {
+            const remainMs = Math.max(0, (playbackCooldownByDevKey.get(devKey) || 0) - Date.now());
+            logger.warn('AppSource', `风控冷却期内快速失败（未发起上游请求）: vid=${vid}, device_key=${devKey}, 剩余冷却≈${Math.ceil(remainMs / 1000)}s`, { playback_id: playbackId, vid });
             throw Object.assign(new Error('上游风控冷却中，稍后自动恢复'), { code: 'RATE_LIMIT_COOLDOWN', status: 503 });
         }
         const steps = buildPlaybackSteps(devKey);
+        logger.info('AppSource', `开始上游取址: vid=${vid}, device_key=${devKey}, 设备年龄=${Math.round((Date.now() - (device?.created_at || Date.now())) / 1000)}s, 候选通道=${steps.length}, 批量=${batch.length}`, { playback_id: playbackId, vid });
         let result = await runPlaybackSteps(steps, vid, payload, device, execRequestJson, deadline, internalSignal);
 
         if (!result.response && result.allEmpty && device?.created_at
@@ -900,10 +913,12 @@ async function resolveUpstreamEntry(vid, batch, refresh, callerSignal) {
             // 标记冷却并以冷却错误返回：客户端收到 RATE_LIMIT_COOLDOWN 会走长退避
             // 而不触发“空响应自动换设备”——避免零信任的新设备绕过熔断继续风暴。
             markPlaybackCooldown(devKey);
+            logger.warn('AppSource', `全通道空响应 → 触发风控熔断，冷却 ${PLAYBACK_COOLDOWN_MS / 1000}s: vid=${vid}, device_key=${devKey}`, { playback_id: playbackId, vid });
             // 同步尝试设备池轮换：切到历史可用设备后，退避重试将以新身份（无冷却）
             // 直连上游，若该设备已被放行则直接恢复播放。
             const rotated = tryRotateToPooledDevice();
             if (rotated) logger.info('AppSource', `已轮换至设备池历史可用设备 device_id=${rotated.device_id}，退避后将以新身份重试`);
+            else logger.info('AppSource', `设备池无可轮换的历史可用设备（或 5 分钟内已轮换过），维持当前身份等待冷却结束: device_key=${devKey}`, { playback_id: playbackId });
             throw Object.assign(new Error('上游风控冷却中，稍后自动恢复'), { code: 'RATE_LIMIT_COOLDOWN', status: 503 });
         }
 
@@ -932,10 +947,12 @@ async function fetchAppPlayUrl(vid, options = {}) {
 
     const allowHevc = options.allowHevc !== false;
     const allowHevcTranscode = options.allowHevcTranscode === true;
+    logger.info('AppSource', `fetchAppPlayUrl: vid=${vid}, quality=${requestedQuality}, allowHevc=${allowHevc}, allowBytevc2=${options.allowBytevc2 === true}, allowHevcTranscode=${allowHevcTranscode}, refresh=${options.refresh === true}, entryCache=${entryCache.has(vid)}`);
     if (!options.refresh && entryCache.has(vid)) {
         const cached = entryCache.get(vid);
         if (cached?.expires > Date.now()) {
             try {
+                logger.info('AppSource', `命中分集缓存，直接解析: vid=${vid}`);
                 return await parseEntryPlayInfo(vid, cached.entry, requestedQuality, allowLowerQuality, deadline, signal, options.allowBytevc2 === true, allowHevc, allowHevcTranscode);
             } catch (error) {
                 if (error.code === 'UNSUPPORTED_BYTEVC2' || error.code === 'UNSUPPORTED_HEVC') throw error;

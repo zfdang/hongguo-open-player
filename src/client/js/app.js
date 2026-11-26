@@ -1502,6 +1502,7 @@ const app = createApp({
         const probe = await fetch(streamUrl, { headers: { Range: 'bytes=0-0' } });
         const errData = await probe.json().catch(() => null);
         if (recommendStreamUrl.value !== streamUrl) return;
+        reportClientLog('WARN', `推荐预览源探测: HTTP=${probe.status}, code=${errData?.code || '无'}, error=${errData?.error || ''}`);
         if (errData?.code === 'BYTEVC2_PROGRESSIVE' && window.Bytevc2Stream?.supported() && Number(errData.duration) > 0) {
           bytevc2Fallback = () => {
             if (video !== recommendVideoEl.value || recommendStreamUrl.value !== streamUrl) return;
@@ -2353,6 +2354,7 @@ const app = createApp({
             if (!probeRes.ok && activeEpisodeIndex.value === currentEpIndex) {
               const errData = await probeRes.json().catch(() => null);
               if (activeEpisodeIndex.value !== currentEpIndex || currentStreamUrl.value !== streamUrl) return;
+              reportClientLog('WARN', `播放器源探测: HTTP=${probeRes.status}, code=${errData?.code || '无'}, error=${errData?.error || ''}, 第 ${currentEpIndex} 集`);
               if (errData?.code !== 'BYTEVC2_PROGRESSIVE') reportClientLog('ERROR', `播放器解码/渲染报错: code=${code}, message=${message}`);
               if (errData?.code === 'BYTEVC2_PROGRESSIVE' && window.Bytevc2Stream?.supported() && Number(errData.duration) > 0) {
                 videoErrorMessage.value = '';
@@ -2435,9 +2437,13 @@ const app = createApp({
     // 播放恢复（时间更新走动）后计数清零。确定性失败（编码不支持等）不重试。
     let autoStreamRetryCount = 0;
     function tryAutoStreamRetry() {
-      if (autoStreamRetryCount >= 2) return;
+      if (autoStreamRetryCount >= 2) {
+        reportClientLog('WARN', `播放失败自动重试已达上限 (2/2)，停止自动重试: 第 ${activeEpisodeIndex.value} 集`);
+        return;
+      }
       autoStreamRetryCount++;
       isBuffering.value = true;
+      reportClientLog('WARN', `播放失败自动重试本集 (${autoStreamRetryCount}/2): 第 ${activeEpisodeIndex.value} 集`);
       showOSD(`播放失败，正在自动重试（${autoStreamRetryCount}/2）…`);
       setTimeout(() => {
         if (viewMode.value === 'theater') retryCurrentEpisode();
@@ -2453,10 +2459,12 @@ const app = createApp({
       if (cooldownRetryCount >= 8) {
         isBuffering.value = false;
         videoErrorMessage.value = '上游风控冷却超时；请点击“重试本集”或稍后再试';
+        reportClientLog('ERROR', '风控冷却长退避已达上限 (8/8)，停止自动重试，等待用户手动重试');
         return;
       }
       cooldownRetryCount++;
       isBuffering.value = true;
+      reportClientLog('WARN', `风控冷却长退避重试 (${cooldownRetryCount}/8)，10 秒后重试第 ${activeEpisodeIndex.value} 集`);
       showOSD(`风控冷却中，10 秒后自动重试（${cooldownRetryCount}/8）…`);
       setTimeout(() => {
         if (viewMode.value === 'theater') retryCurrentEpisode();
