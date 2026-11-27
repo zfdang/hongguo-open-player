@@ -506,42 +506,71 @@ async function fetchEpisodeListFromWeb(seriesId, deadline = 0) {
   }
 }
 
-async function fetchEpisodeListFresh(seriesId, { deadline = 0 } = {}) {
-  let webError;
-  try {
-    return await fetchEpisodeListFromWeb(seriesId, deadline);
-  } catch (error) {
-    webError = error;
-    logger.warn('HongguoNative', `官网网页分集获取未命中，回退至App备用接口: seriesId=${seriesId}, 原因: ${error.message}`);
-  }
-  const body = {
-    biz_param: DETAIL_BIZ_PARAM,
-    dr_scene: "preload",
-    series_id: seriesId,
+
+/**
+ * 接口里的 series_id/vid 等可能以 JSON 数字下发（19 位），JSON.parse 会丢精度
+ * （7711182077240036377 -> ...036000），导致"剧集不一致"误判。解析前加引号。
+ */
+const BIG_ID_FIELD = /("(?:series_id|vid|book_id|item_id|episode_id|comment_id|seriesId|bookId|itemId)"\s*:\s*)(-?\d{16,})(?=\s*[,}\]])/g;
+function parseJsonWithBigIds(text) {
+  return JSON.parse(String(text).replace(BIG_ID_FIELD, (match, prefix, digits) => prefix + '"' + digits + '"'));
+}
+
+/**
+ * 用 v5 播放签名调用 App 接口（gzip 体 + 本机注册设备身份）。
+ * 2026-11-27：官网网页把 vid_list 换成 v1_xxx 不透明 ID（付费剧只给 5 条），
+ * 无签名的 apiCall 对 detail 接口一律 200+0 字节；带 v5 签名能拿回完整数字 vid。
+ */
+async function signedAppCall(apiPath, payload, timeout = 20000) {
+  const { signPlaybackV5 } = require('./v5-sign');
+  const { getPlaybackDevice } = require('./playback-device');
+  const { gzipSync } = require('node:zlib');
+  const device = await getPlaybackDevice();
+  const body = gzipSync(Buffer.from(JSON.stringify(payload)));
+  const values = {
+    aid: '8662', app_name: 'novelread', version_code: '74332', version_name: '7.4.3.32',
+    channel: 'vivo_8662_64', device_platform: 'android', device_type: 'PGT-AN10',
+    os_version: '12', update_version_code: '74332',
+    iid: String(device.iid || ''), cdid: String(device.cdid || ''), device_id: String(device.device_id || ''),
   };
-  let j;
-  try {
-    j = await apiCall("/novel/player/multi_video_detail/preload/v1", body, 3, 25000, deadline);
-  } catch (e) {
-    throw new Error(`获取分集失败：官网数据源（${webError.message}），备用接口（${e.message}）`);
+  const { url, headers } = signPlaybackV5(API + apiPath, values, body);
+  const res = await axios.post(url, body, {
+    headers: {
+      ...headers,
+      'User-Agent': UA.replace('/71532', '/74332'),
+      Accept: 'application/json',
+      'Content-Encoding': 'gzip',
+    },
+    timeout,
+    responseType: 'arraybuffer',
+    transformResponse: [(d) => d],
+    maxRedirects: 0,
+    validateStatus: () => true,
+  });
+  const buf = Buffer.from(res.data || []);
+  if (res.status !== 200) throw new Error('HTTP ' + res.status);
+  if (!buf.length) {
+    const logid = res.headers && res.headers['x-tt-logid'];
+    throw Object.assign(new Error('接口返回空响应（HTTP 200，0 字节）' + (logid ? ' logid=' + logid : '')), { code: 'EMPTY_RESPONSE' });
   }
-  if (!j || j.code !== 0) {
-    throw new Error("detail API 失败: " + JSON.stringify(j || {}).slice(0, 200));
-  }
+  try { return parseJsonWithBigIds(buf.toString('utf8')); }
+  catch (_) { throw new Error('响应不是合法 JSON（HTTP 200，' + buf.length + ' 字节）'); }
+}
+
+/** 分集列表：签名 App 接口。返回与网页版本同构对象。 */
+async function fetchEpisodeListFromApp(seriesId, timeout = 20000) {
+  const body = { biz_param: DETAIL_BIZ_PARAM, dr_scene: 'preload', series_id: seriesId };
+  const j = await signedAppCall('/novel/player/multi_video_detail/preload/v1', body, timeout);
+  if (!j || Number(j.code) !== 0) throw new Error('detail API 失败: ' + JSON.stringify(j || {}).slice(0, 200));
   const d = j.data || {};
   const requested = String(seriesId);
-  // Never take the first key from an object: a mismatched response must fail closed.
   const sid = Object.prototype.hasOwnProperty.call(d, requested) ? requested : '';
-  if (!sid) {
-    throw new Error("备用接口返回的剧集与请求不一致");
-  }
+  if (!sid) throw new Error('备用接口返回的剧集与请求不一致');
   const vd = d[sid]?.video_data || {};
-  if (vd.series_id && String(vd.series_id) !== sid) {
-    throw new Error("备用接口返回的剧集与请求不一致");
-  }
+  if (vd.series_id && String(vd.series_id) !== sid) throw new Error('备用接口返回的剧集与请求不一致');
   const vl = vd.video_list || [];
-  if (vl.some(item => item?.series_id && String(item.series_id) !== sid)) {
-    throw new Error("备用接口返回了其他剧集的分集");
+  if (vl.some((item) => item && item.series_id && String(item.series_id) !== sid)) {
+    throw new Error('备用接口返回了其他剧集的分集');
   }
   const eps = vl.map((item) => ({
     vid: String(item.vid),
@@ -552,6 +581,7 @@ async function fetchEpisodeListFresh(seriesId, { deadline = 0 } = {}) {
     cover: vd.series_cover || vd.cover_url || item.cover_url || '',
   }));
   if (!eps.length) throw new Error('备用接口分集列表为空');
+  if (eps.some((ep) => !/^\d{1,30}$/.test(ep.vid))) throw new Error('备用接口分集编号格式异常');
   eps.sort((a, b) => a.vid_index - b.vid_index);
   return {
     series_id: String(sid),
@@ -560,6 +590,22 @@ async function fetchEpisodeListFresh(seriesId, { deadline = 0 } = {}) {
     total: eps.length,
     episodes: eps,
   };
+}
+
+async function fetchEpisodeListFresh(seriesId, { deadline = 0 } = {}) {
+  const budget = deadline ? Math.max(1000, Math.min(20000, deadline - Date.now())) : 20000;
+  let appError;
+  try {
+    return await fetchEpisodeListFromApp(seriesId, budget);
+  } catch (error) {
+    appError = error;
+    logger.warn('HongguoNative', `签名 App 分集接口未命中，回退官网网页: seriesId=${seriesId}, 原因: ${error.message}`);
+  }
+  try {
+    return await fetchEpisodeListFromWeb(seriesId, deadline);
+  } catch (webError) {
+    throw new Error(`获取分集失败：签名App接口（${appError.message}），官网数据源（${webError.message}）`);
+  }
 }
 
 /**
