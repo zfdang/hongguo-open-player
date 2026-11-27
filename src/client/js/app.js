@@ -587,6 +587,9 @@ const app = createApp({
     const qr = ref({ token: '', qrcode: '', expire_at: 0, countdown: 0, status: 'idle', notice: '', loading: false });
     let qrPollTimer = null;
     let qrCountdownTimer = null;
+    // 手机号 + 短信验证码登录（与扫码并存）
+    const sms = ref({ mobile: '', code: '', busy: false, countdown: 0, notice: '', masked: '' });
+    let smsCountdownTimer = null;
     const relatedWorks = ref([]);
     const relatedWorksLoading = ref(false);
     const relatedWorksNotice = ref('');
@@ -867,6 +870,71 @@ const app = createApp({
       }, 1000);
     }
 
+    // ── 短信验证码登录 ──
+    function startSmsCountdown(seconds) {
+      clearInterval(smsCountdownTimer);
+      sms.value = { ...sms.value, countdown: Math.max(0, Number(seconds) || 60) };
+      smsCountdownTimer = setInterval(() => {
+        if (sms.value.countdown <= 0) { clearInterval(smsCountdownTimer); return; }
+        sms.value = { ...sms.value, countdown: sms.value.countdown - 1 };
+      }, 1000);
+    }
+
+    async function sendSmsLoginCode() {
+      if (sms.value.busy || sms.value.countdown > 0) return;
+      const mobile = String(sms.value.mobile || '').trim();
+      if (!mobile) { sms.value = { ...sms.value, notice: '请输入手机号' }; return; }
+      sms.value = { ...sms.value, busy: true, notice: '' };
+      try {
+        const res = await fetch('/api/account/login/sms/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mobile }),
+        }).then(r => r.json());
+        if (res.error) {
+          if (res.retry_after) startSmsCountdown(res.retry_after);
+          sms.value = { ...sms.value, busy: false, notice: res.error };
+          return;
+        }
+        sms.value = { ...sms.value, busy: false, masked: res.mobile || mobile, notice: `验证码已发送至 ${res.mobile || mobile}` };
+        startSmsCountdown(res.retryAfter || 60);
+      } catch (_) {
+        sms.value = { ...sms.value, busy: false, notice: '验证码发送失败，请检查网络' };
+      }
+    }
+
+    async function verifySmsLogin() {
+      if (sms.value.busy) return;
+      const code = String(sms.value.code || '').trim();
+      if (!code) { sms.value = { ...sms.value, notice: '请输入短信验证码' }; return; }
+      sms.value = { ...sms.value, busy: true, notice: '' };
+      try {
+        const res = await fetch('/api/account/login/sms/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        }).then(r => r.json());
+        if (res.error) {
+          if (res.retry_after) startSmsCountdown(res.retry_after);
+          sms.value = { ...sms.value, busy: false, notice: res.error };
+          return;
+        }
+        if (res.success) {
+          account.value = {
+            logged_in: Boolean(res.logged_in), user: res.user || null,
+            expired: Boolean(res.expired), notice: res.notice || '',
+            storage_encrypted: Boolean(res.storage_encrypted),
+          };
+          sms.value = { ...sms.value, busy: false, code: '', notice: '' };
+          stopQrPolling();
+          switchAccountTab('history');
+        } else {
+          sms.value = { ...sms.value, busy: false, notice: res.notice || '登录未成功，请重试' };
+        }
+      } catch (_) {
+        sms.value = { ...sms.value, busy: false, notice: '登录请求失败，请检查网络' };
+      }
+    }
     async function startQrLogin() {
       stopQrPolling();
       qr.value = { token: '', qrcode: '', expire_at: 0, countdown: 0, status: 'loading', notice: '', loading: true };
@@ -2895,7 +2963,8 @@ const app = createApp({
       reserveSubTab, reserveSubTabs, visibleRecordItems, switchReserveSubTab,
       cloudRecordKind, isCloudTab,
       openAccountModal, closeAccountModal, onAccountModalKeydown, switchAccountTab,
-      startQrLogin, logoutAccount, loadAccountRecords, playFromCloudRecord,
+      startQrLogin, logoutAccount,
+      sms, sendSmsLoginCode, verifySmsLogin, loadAccountRecords, playFromCloudRecord,
       relatedWorks, relatedWorksLoading, relatedWorksNotice, loadRelatedWorks,
       reservedIds, pendingReserveId, reservingId, askReserve,
       socialState, socialBusy, showComments, comments,

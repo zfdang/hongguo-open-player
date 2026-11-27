@@ -914,6 +914,19 @@
               <p class="qr-tip">打开 <strong>红果免费短剧 App</strong> → 我的 → 扫一扫。二维码约 60 秒有效，请尽快扫码确认。</p>
               <p v-if="qr.notice" class="qr-notice">{{ qr.notice }}</p>
               <p class="qr-security-tip">登录凭据仅保存在本机（{{ account.storage_encrypted ? '已加密' : '权限 600 的本地文件' }}），不会上传到任何第三方服务器。扫码登录走官网通道，接口非官方授权，可能随时失效。</p>
+              <details class="account-sms-box" open>
+                <summary>手机号 + 短信验证码登录（扫码不便时用）</summary>
+                <div class="account-sms-form">
+                  <input v-model="sms.mobile" type="tel" inputmode="tel" maxlength="20" placeholder="请输入手机号" class="account-sms-input" />
+                  <div class="account-sms-row">
+                    <input v-model="sms.code" inputmode="numeric" maxlength="8" placeholder="4–8 位验证码" class="account-sms-input" @keydown.enter="verifySmsLogin" />
+                    <button type="button" class="account-sms-send" :disabled="sms.busy || sms.countdown > 0" @click="sendSmsLoginCode">{{ sms.countdown > 0 ? sms.countdown + 's' : '获取验证码' }}</button>
+                  </div>
+                  <button type="button" class="account-sms-submit" :disabled="sms.busy" @click="verifySmsLogin">{{ sms.busy ? '处理中…' : '登录' }}</button>
+                  <p v-if="sms.notice" class="qr-notice">{{ sms.notice }}</p>
+                  <p class="qr-security-tip">短信登录走官方 passport 通道；手机号与验证码不会保存在本机。</p>
+                </div>
+              </details>
             </template>
             <template v-else>
               <div class="account-profile-card">

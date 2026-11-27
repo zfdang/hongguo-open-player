@@ -229,6 +229,26 @@ app.post('/api/account/login/poll', async (req, res) => {
   } catch (err) { sendApiError(res, err); }
 });
 
+// 手机号 + 短信验证码登录（与扫码登录并存，成功后同样接管账号会话）
+app.post('/api/account/login/sms/send', async (req, res) => {
+  try {
+    const result = await require('./native/account-sms').sendCode(req.body?.mobile);
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(err.code === 'RATE_LIMIT' ? 429 : 400).json({ error: err.message, code: err.code, retry_after: err.retryAfter });
+  }
+});
+
+app.post('/api/account/login/sms/verify', async (req, res) => {
+  try {
+    const status = await require('./native/account-sms').verify(req.body?.code);
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, ...status });
+  } catch (err) {
+    res.status(err.code === 'RATE_LIMIT' ? 429 : 400).json({ error: err.message, code: err.code, retry_after: err.retryAfter });
+  }
+});
 app.post('/api/account/logout', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json(accountService().logout());
