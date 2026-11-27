@@ -100,6 +100,43 @@ const app = createApp({
     const isFullscreen = ref(false);
     const isControlsHidden = ref(false);
     let controlsHideTimer = null;
+    // 切集/换源进行中：不吃中央 ▶ 大按钮、不上缓冲遮罩、不弹控制条（自动连播要无感衔接）
+    const isSwitchingEpisode = ref(false);
+    // 缓冲遮罩延迟显示：短暂加载不闪一块遮罩，真卡住超过 400ms 才出现
+    const bufferingVisible = ref(false);
+    let bufferingVisibleTimer = null;
+    watch(isBuffering, (value) => {
+      clearTimeout(bufferingVisibleTimer);
+      if (!value) { bufferingVisible.value = false; return; }
+      bufferingVisibleTimer = setTimeout(() => {
+        if (isBuffering.value) bufferingVisible.value = true;
+      }, 400);
+    });
+    // 自动连播"保持隐藏"保护：切集前若控制条是隐藏的，就钉住它直到播放稳定或用户真的操作。
+    let continuityGuardUntil = 0;
+    let continuityGuardHide = false;
+    function armContinuityGuard() {
+      continuityGuardHide = isControlsHidden.value;
+      continuityGuardUntil = continuityGuardHide ? Date.now() + 8000 : 0;
+    }
+    function disarmContinuityGuard() {
+      continuityGuardUntil = 0;
+      continuityGuardHide = false;
+    }
+    function continuityGuardActive() {
+      return continuityGuardHide && Date.now() < continuityGuardUntil;
+    }
+    let suppressControlsUntil = 0;
+    function suppressControlsBriefly(ms = 1500) { suppressControlsUntil = Date.now() + ms; }
+    function controlsSuppressed() { return isSwitchingEpisode.value || Date.now() < suppressControlsUntil; }
+    function releaseControlsSuppression() { suppressControlsUntil = 0; }
+    function idleControlsHideActive() {
+      return (isFullscreen.value || viewMode.value === 'theater') && isPlaying.value && !isScrubbing.value;
+    }
+    // 状态级兜底：保护窗口内任何"显示控制条"的路径都被同步改回隐藏（不产生可见帧）
+    watch(isControlsHidden, (hidden) => {
+      if (!hidden && continuityGuardActive()) isControlsHidden.value = true;
+    }, { flush: 'sync' });
     const previewTime = ref(0);
     const previewPercent = ref(0);
     const showPreview = ref(false);
@@ -1193,6 +1230,13 @@ const app = createApp({
     }
 
     function setControlsHidden(hidden) {
+      // 连播/切集期间禁止把控制条显示出来（pause/play 事件时序会让它闪一下）。
+      if (!hidden && (controlsSuppressed() || continuityGuardActive())) {
+        if (typeof document !== 'undefined' && document.body?.classList) {
+          document.body.classList.toggle('hide-cursor', Boolean(isFullscreen.value));
+        }
+        return;
+      }
       isControlsHidden.value = hidden;
       if (typeof document !== 'undefined' && document.body?.classList) {
         document.body.classList.toggle('hide-cursor', Boolean(hidden && isFullscreen.value));
@@ -1200,7 +1244,9 @@ const app = createApp({
     }
 
     function handleWindowMouseMove() {
-      if (isFullscreen.value && isControlsHidden.value) {
+      releaseControlsSuppression();
+      disarmContinuityGuard();
+      if (isControlsHidden.value && (isFullscreen.value || viewMode.value === 'theater')) {
         resetControlsTimer();
       }
     }
@@ -1214,9 +1260,9 @@ const app = createApp({
         setControlsHidden(false);
       }
       clearTimeout(controlsHideTimer);
-      if (isFullscreen.value && isPlaying.value && !isScrubbing.value) {
+      if (idleControlsHideActive()) {
         controlsHideTimer = setTimeout(() => {
-          if (isFullscreen.value && isPlaying.value && !isScrubbing.value) {
+          if (idleControlsHideActive()) {
             setControlsHidden(true);
           }
         }, 2500);
@@ -2052,8 +2098,23 @@ const app = createApp({
       nextTick(() => window.scrollTo?.(0, catalogScrollTop));
     }
 
-    function switchEpisode(ep) {
+    function beginEpisodeSwitch() {
+      isSwitchingEpisode.value = true;
+      clearTimeout(switchingSafetyTimer);
+      switchingSafetyTimer = setTimeout(() => { isSwitchingEpisode.value = false; }, 15000);
+    }
+    function endEpisodeSwitch() {
+      clearTimeout(switchingSafetyTimer);
+      switchingSafetyTimer = null;
+      isSwitchingEpisode.value = false;
+      suppressControlsBriefly(1500);
+    }
+    let switchingSafetyTimer = null;
+
+    function switchEpisode(ep, { auto = false } = {}) {
       if (activeEpisodeIndex.value === ep.vid_index) return;
+      beginEpisodeSwitch();
+      if (auto) armContinuityGuard();
       saveProgressNow();
       resetPlayback();
       videoErrorMessage.value = '';
@@ -2089,14 +2150,14 @@ const app = createApp({
       }
     }
 
-    function playNextEpisode() {
+    function playNextEpisode(auto = false) {
       if (activeEpisodeIndex.value >= activeEpisodes.value.length) return;
       const next = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value + 1);
       if (next) {
         // 同步分组
         const group = episodeGroups.value.find(g => next.vid_index >= g.start && next.vid_index <= g.end);
         if (group) currentGroup.value = group;
-        switchEpisode(next);
+        switchEpisode(next, { auto: auto === true });
       }
     }
 
@@ -2215,8 +2276,9 @@ const app = createApp({
       markWatched(activeEpisodeIndex.value);
       if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing';
       isBuffering.value = false;
+      endEpisodeSwitch();
       reportClientLog('INFO', `播放器起播: 《${activeSeries.value?.series_title || ''}》 第 ${activeEpisodeIndex.value} 集`);
-      resetControlsTimer();
+      if (!controlsSuppressed()) resetControlsTimer();
     }
 
     function checkVideoDimensionsFallback(video) {
@@ -2256,6 +2318,11 @@ const app = createApp({
       if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused';
       saveProgressNow();
       reportCloudProgress(true);
+      if (controlsSuppressed()) return;
+      // 一集自然播完时的 pause 不要弹控制条（集末或已接近末尾都算）。
+      const video = videoEl.value;
+      const nearEnd = Boolean(video && (video.ended || (Number(video.duration) > 0 && Number(video.duration) - Number(video.currentTime) < 1.2)));
+      if (nearEnd) return;
       setControlsHidden(false);
       clearTimeout(controlsHideTimer);
     }
@@ -2324,7 +2391,9 @@ const app = createApp({
     function onEnded(event) {
       if (event && event.target !== videoEl.value) return;
       console.log('[Player] 本集播放完成，正在无感自动切入下一集...');
-      playNextEpisode();
+      // 集末 pause 可能早于 ended 到达，所以保护必须在切集之前立起来。
+      armContinuityGuard();
+      playNextEpisode(true);
     }
 
     async function onVideoError(e) {
@@ -2644,7 +2713,10 @@ const app = createApp({
       }
 
       if (viewMode.value === 'theater') {
-        resetControlsTimer();
+        // 注意：这里不要 resetControlsTimer()。快进/快退、静音、切集等快捷操作
+        // 只用屏幕中间的 OSD 小字反馈；把上下控制条顶出来会很打断观感。
+        releaseControlsSuppression();
+        disarmContinuityGuard();
         const isSpace = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar' || e.key?.toLowerCase() === 'k';
         if (isSpace) {
           e.preventDefault();
@@ -2773,7 +2845,7 @@ const app = createApp({
     return {
       savePreferences, danmakuEnabled, showDanmakuSettings, danmakuRows, danmakuOpacity, danmakuSpeed, danmakuLikesPriority, toggleLikesPriority, prioritizeDanmakuItems, estimateDanmakuWidth, calculateRequiredGap, danmakuStatus, danmakuLayer, danmakuColor, toggleDanmaku, loadDanmaku,
       toastText, osdMessage, sidebarOpen, isScrubbing, previewTime, previewPercent, showPreview,
-      isFullscreen, isControlsHidden, resetControlsTimer, clearControlsTimer, setControlsHidden, handleWindowMouseMove,
+      isFullscreen, isControlsHidden, isSwitchingEpisode, bufferingVisible, resetControlsTimer, clearControlsTimer, setControlsHidden, handleWindowMouseMove,
       previewSeek, seekFromSlider, startScrubbing, finishScrubbing,
       viewMode,
       currentTab,
