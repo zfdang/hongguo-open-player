@@ -486,3 +486,15 @@
   .rail-icon { font-size: 26px; }
   .comments-panel { width: 100vw; max-width: 100vw; }
 }
+/* 手机号 + 短信验证码登录 */
+.account-sms-box { margin-top: 14px; border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 10px 12px; }
+.account-sms-box > summary { cursor: pointer; font-size: 13px; color: rgba(255,255,255,0.72); }
+.account-sms-form { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.account-sms-input { width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.06); color: #fff; font-size: 14px; outline: none; }
+.account-sms-input:focus { border-color: rgba(255,90,60,0.65); }
+.account-sms-row { display: flex; gap: 8px; }
+.account-sms-row .account-sms-input { flex: 1; min-width: 0; }
+.account-sms-send { padding: 0 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.06); color: #fff; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.account-sms-send:disabled { opacity: .55; cursor: default; }
+.account-sms-submit { padding: 10px; border: 0; border-radius: 8px; background: #ff5a3c; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+.account-sms-submit:disabled { opacity: .6; cursor: default; }

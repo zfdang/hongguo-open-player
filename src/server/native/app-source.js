@@ -394,6 +394,42 @@ function signedAccountRequest(apiPath, values = {}, identity, { payload = null, 
     return { url, headers, body };
 }
 
+// 短信登录（passport）签名：v3 形态；query/body 由调用方决定（官方 App 发码走 query，验码走表单体）。
+// 设备表里刻意不含 device_id/iid（passport 靠 Cookie 识别设备，带上会被判异常设备）。
+function signPassportRequest(base, values, body, device) {
+    const khronos = Math.floor(Date.now() / 1000);
+    const ticketBase = Date.now();
+    let requestTicket = ticketBase, query = '', url = '';
+    for (let n = 0; n < 128; n += 1) {
+        requestTicket = ticketBase + n;
+        query = pythonUrlEncode({ ...values, ts: String(khronos), _rticket: String(requestTicket) });
+        url = `${base}?${query}`;
+        if (branchOf(url, body, khronos) === 0) break;
+        if (n === 127) throw new Error('无法生成 passport 请求签名');
+    }
+    const headers = {
+        'User-Agent': 'com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)',
+        Accept: 'application/json; charset=utf-8,application/x-protobuf',
+        'x-ss-req-ticket': String(requestTicket),
+        'x-tt-request-tag': 't=0;n=0',
+        'passport-sdk-version': '50561',
+        'sdk-version': '2',
+        'x-xs-from-web': '0',
+        'x-khronos': String(khronos),
+        'x-ladon': be32(khronos).toString('base64'),
+        'x-argus': le32(khronos).toString('base64'),
+        'x-gorgon': xGorgon(query, body, khronos, Math.floor(Math.random() * 65536)),
+        'x-helios': helios(khronos),
+        'x-medusa': buildMedusa(url, body, khronos, device),
+        'x-tt-dt': '',
+    };
+    if (body) {
+        headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        headers['x-ss-stub'] = md5(body);
+    }
+    return { url, headers };
+}
+
 function parseFallback(value) {
     if (typeof value === 'string') { const parsed = jsonBody(value); return parsed?.fallback_api || value; }
     if (Array.isArray(value)) return str(value[0]);
@@ -1041,4 +1077,5 @@ function clearSeriesSocialCache(seriesId) {
     if (sid) socialCache.delete(sid);
 }
 
-module.exports = { fetchAppPlayUrl, fetchSeriesEpisodeSocial, clearSeriesSocialCache, clearEntryCache, isHevcCodec, signedSearchRequest, signedMetadataRequest, signedAccountRequest, parseSearchInteger, requestJson, playbackRequest, shortplayRequest, SEARCH_API, SEARCH_UA };
+module.exports = {
+  signPassportRequest, DEVICE, pythonUrlEncode, fetchAppPlayUrl, fetchSeriesEpisodeSocial, clearSeriesSocialCache, clearEntryCache, isHevcCodec, signedSearchRequest, signedMetadataRequest, signedAccountRequest, parseSearchInteger, requestJson, playbackRequest, shortplayRequest, SEARCH_API, SEARCH_UA };

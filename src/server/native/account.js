@@ -378,6 +378,23 @@ function createAccountService(options = {}) {
     }
   }
 
+  // 外部登录（短信验证码）拿到 Cookie 后接管：与扫码登录共用同一 jar / 凭据存储。
+  async function adoptSession(cookies, mobileMasked) {
+    restore();
+    jar.restore(cookies || {});
+    if (!jar.hasSession()) throw Object.assign(new Error('登录没有成功，平台没有下发登录态'), { code: 'NO_SESSION' });
+    let user = { user_id: '', name: '' };
+    try {
+      const payload = await apiRequest('/reading/user/info/v1/', {});
+      const data = payload?.data || {};
+      user = { user_id: str(data.biz_user_id), name: str(data.user_name || data.name) };
+    } catch (error) {
+      logger.warn('Account', `短信登录后资料读取失败（凭据已保存）: ${safeMessage(error)}`);
+    }
+    credentials = { cookies: jar.snapshot(), user, mobile: mobileMasked || '', expires_at: jar.sessionExpiresAt(), saved_at: now() };
+    persist();
+    return status();
+  }
   function logout() {
     restore();
     jar.clear();
@@ -797,7 +814,7 @@ function createAccountService(options = {}) {
   }
 
   return {
-    startLogin, pollLogin, logout, status, profile,
+    startLogin, pollLogin, logout, status, profile, adoptSession,
     history, likes, favorites, reserves, related, reserve, setSocialAction, reportProgress,
     loggedIn,
     // 测试与复用需要的内部件
